@@ -16,9 +16,14 @@ The current `0.2` version is an early design and codec milestone:
 - a threat model;
 - reproducible performance targets;
 - allocation-free Rust codecs for short-header DATA, ACK, CONTROL, and PROBE
-  packets, plus fragmented long-header handshake packets.
+  packets, plus fragmented long-header handshake packets;
 - sender-side CREDIT accounting that enforces absolute byte and fragment
-  ceilings without charging retransmissions twice.
+  ceilings without charging retransmissions twice;
+- canonical handshake, transcript, and HKDF serializers;
+- provider-neutral in-place packet-protection orchestration with enforced AEAD
+  usage limits;
+- reproducible AES-256-GCM and ChaCha20-Poly1305 packet vectors;
+- an opt-in deterministic multipath fault simulator.
 
 This code is not production-ready and must not yet protect sensitive data.
 
@@ -27,16 +32,19 @@ This code is not production-ready and must not yet protect sensitive data.
 - [`SPEC.md`](docs/SPEC.md) — wire format and state machine;
 - [`CRYPTO.md`](docs/CRYPTO.md) — transcript, hybrid key schedule, and labels;
 - [`THREAT_MODEL.md`](docs/THREAT_MODEL.md) — guarantees, adversaries, and limits;
-- [`BENCHMARKS.md`](docs/BENCHMARKS.md) — RAM/CPU budgets and measurement plan.
+- [`BENCHMARKS.md`](docs/BENCHMARKS.md) — RAM/CPU budgets and measurement plan;
+- [`SIMULATION.md`](docs/SIMULATION.md) — deterministic fault-model semantics.
 
 ## Development
 
-The initial codec has no external dependencies:
+The default library has no external dependencies. Development-only RustCrypto
+packages reproduce the public cryptographic vectors:
 
 ```sh
-cargo test
+cargo test --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-The next milestones are a deterministic loss/reordering simulator, an audited
-cryptographic-provider interface, and packet protection test vectors.
+The next milestones are loss recovery and congestion-control state machines,
+an audited cryptographic-provider adapter, and a batched UDP runtime with
+measured allocation/copy budgets.

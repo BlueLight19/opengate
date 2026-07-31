@@ -56,6 +56,12 @@ attributable page cache separately.
 two physical hosts so loopback, veth, and deferred copies do not distort
 zero-copy results.
 
+Before wall-clock experiments, every loss-recovery and multipath change is run
+through the logical-clock simulator described in [`SIMULATION.md`](SIMULATION.md).
+The deterministic suite covers periodic loss, duplication, reordering, path
+disablement, and preservation of already in-flight packets. It is a protocol
+correctness gate, not a substitute for `netem` or physical-host measurements.
+
 ## Object sizes
 
 - 1 KiB to measure handshake cost.

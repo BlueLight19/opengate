@@ -80,8 +80,10 @@ The size is 13 bytes:
 - bytes 9..12: truncated packet number in network byte order.
 
 The class, key phase, reserved bits, and packet number MUST be masked by header
-protection. The DCID remains visible so a receiver can select the connection and
-header-protection key.
+protection. The seven low flag bits are XORed with the low seven bits of mask
+byte zero; the four packet-number bytes are XORed with mask bytes one through
+four. The DCID remains visible so a receiver can select the connection and
+stable header-protection key.
 
 ## 6. Packet protection
 
@@ -105,9 +107,10 @@ Send processing is strictly: encode plaintext, seal plaintext in place, append
 the tag, then protect the header. Receive processing performs the inverse. An
 implementation MUST NOT expose plaintext before tag validation.
 
-The HKDF labels and key schedule are fixed in [`CRYPTO.md`](CRYPTO.md). The
-exact header-protection construction and its vectors remain a release blocker
-for external interoperability.
+The HKDF labels, key schedule, and header-protection construction are fixed in
+[`CRYPTO.md`](CRYPTO.md). Complete packet-protection vectors for both cipher
+suites are published in
+[`packet-protection-v1.txt`](../test-vectors/packet-protection-v1.txt).
 
 ## 7. DATA fast path
 

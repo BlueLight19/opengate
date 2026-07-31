@@ -6,11 +6,19 @@ description = "Experimental bounded-memory UDP transfer protocol"
 license = "Apache-2.0 OR MIT"
 publish = false
 
+[features]
+default = []
+simulator = []
+
 [lib]
 name = "ogtp"
 path = "src/lib.rs"
 
 [dev-dependencies]
+aes = "0.8.4"
+aes-gcm = "0.10.3"
+chacha20 = "0.9.1"
+chacha20poly1305 = "0.10.1"
 hmac = "0.12.1"
 sha2 = "0.10.9"
 

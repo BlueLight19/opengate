@@ -199,39 +199,88 @@ nonce = path_iv XOR left_pad_96(packet_number_62)
 ```
 
 A traffic update derives the next directional application secret and then
-re-derives every active path from its DCID:
+re-derives the AEAD key and IV for every active path from its DCID:
 
 ```text
 application_secret_N+1 =
     OGTP-Expand-Label(application_secret_N, "traffic upd", "", 48)
 ```
 
-Old traffic secrets and derived keys are erased after the receive grace period.
-Packet numbers remain monotonic across a symmetric key update.
+`path_hp` is derived from `path_secret_0` and remains stable for the lifetime of
+the DCID. It MUST NOT change during a symmetric key update because the receiver
+needs it to reveal the protected key-phase bit. A full hybrid rekey allocates
+new DCIDs and therefore new header-protection keys.
 
-## 7. Test vectors
+Old AEAD traffic secrets, keys, and IVs are erased after the receive grace
+period. Packet numbers remain monotonic across a symmetric key update.
 
-Machine-readable draft vectors are stored in
-[`test-vectors/kdf-sha384-v1.txt`](../test-vectors/kdf-sha384-v1.txt). They use:
+## 7. Short-header protection
+
+Short packets use a fixed four-byte packet number, so the 16-byte
+header-protection sample starts at byte 13, immediately after the short header.
+Header protection is applied after AEAD sealing.
+
+For AES-256-GCM, the five-byte mask is the first five bytes of:
+
+```text
+AES-256-ECB(path_hp, sample[16])
+```
+
+For ChaCha20-Poly1305, `sample[0..4]` is a little-endian block counter,
+`sample[4..16]` is the 96-bit nonce, and the mask is the first five bytes of the
+ChaCha20 keystream.
+
+Application and removal are the same XOR operation:
+
+```text
+flags_low_7_bits ^= mask[0] & 0x7f
+packet_number[0..4] ^= mask[1..5]
+```
+
+The header-form bit remains public. The DCID remains public so the receiver can
+select the connection and stable header-protection key. After unmasking, the
+complete 13-byte header is AEAD Additional Authenticated Data.
+
+Following the conservative limits established for these AEADs by RFC 9001:
+
+| Suite | Encrypted packets per key | Failed authentication attempts per connection |
+|---|---:|---:|
+| AES-256-GCM | `2^23` | `2^52` |
+| ChaCha20-Poly1305 | bounded by OGTP `2^62` PN space | `2^36` |
+
+An endpoint initiates a key update before an encryption limit and closes the
+session before an authentication-failure limit. Counters never wrap.
+
+## 8. Test vectors
+
+Machine-readable draft vectors are stored in:
+
+- [`kdf-sha384-v1.txt`](../test-vectors/kdf-sha384-v1.txt), covering the key
+  schedule and per-path derivation;
+- [`packet-protection-v1.txt`](../test-vectors/packet-protection-v1.txt),
+  covering nonce formation, AEAD output, header-protection samples and masks,
+  and complete protected packets for both cipher suites.
+
+They use:
 
 - hybrid shared secret `00..3f`;
 - `TH_pre_auth = a0..cf`;
 - `TH_full = d0..ff`;
 - path DCID `0001020304050607`.
 
-The vectors were cross-checked using Python's standard HMAC/SHA-384
-implementation and `cryptography`'s independent HKDFExpand implementation.
+The KDF vectors were cross-checked using Python's standard HMAC/SHA-384
+implementation and `cryptography`'s independent HKDFExpand implementation. The
+packet vectors are continuously reproduced with independent RustCrypto AEAD,
+AES block-cipher, and ChaCha20 implementations in `tests/packet_vectors.rs`.
 
-## 8. Release requirements
+## 9. Release requirements
 
 Before production use, this schedule requires:
 
 - independent cryptographic review;
-- vectors covering Finished MACs, transcript records, AEAD, and header
-  protection;
+- vectors covering Finished MACs and complete authenticated handshakes;
 - enforcement of algorithm-specific AEAD usage limits;
 - constant-time key handling and comparison;
 - erasure tests for ephemeral, handshake, and previous-epoch secrets;
 - formal verification of authentication, downgrade resistance, and key
   separation.
-
