@@ -7,4 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod flow;
+pub mod handshake;
+pub mod kdf;
+pub mod transcript;
 pub mod wire;

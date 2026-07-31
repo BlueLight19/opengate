@@ -105,8 +105,9 @@ Send processing is strictly: encode plaintext, seal plaintext in place, append
 the tag, then protect the header. Receive processing performs the inverse. An
 implementation MUST NOT expose plaintext before tag validation.
 
-The exact header-protection construction, HKDF labels, and derivation vectors
-remain a release blocker for external interoperability.
+The HKDF labels and key schedule are fixed in [`CRYPTO.md`](CRYPTO.md). The
+exact header-protection construction and its vectors remain a release blocker
+for external interoperability.
 
 ## 7. DATA fast path
 
@@ -270,10 +271,11 @@ Initiator                            Responder
     |---------------------------------->| 
 ```
 
-The shared input concatenates the X25519 and ML-KEM-768 secrets with an
-unambiguous encoding, then injects them into HKDF-SHA-384 with the SHA-384
-transcript hash. `auth_r` and `auth_i` contain Ed25519 and ML-DSA-65 signatures
-over the transcript and negotiated parameters.
+The 64-byte hybrid shared input is `ML-KEM-768 shared secret || X25519 shared
+secret`, matching the current X25519MLKEM768 IETF construction. It is injected
+into an HKDF-SHA-384 key schedule bound to the SHA-384 transcript hash.
+`auth_r` and `auth_i` contain Ed25519 and ML-DSA-65 signatures over the
+transcript and negotiated parameters.
 
 The RETRY cookie binds at least the source address, source port, CID, nonce,
 version, and expiry. Before cookie validation, a responder:
@@ -315,6 +317,104 @@ HELLO and RETRY require no fragment reassembly. A responder MUST validate the
 RETRY cookie before allocating an INIT reassembly slot. Reassembly uses a fixed
 16 KiB slot plus a bounded receipt bitmap; unauthenticated wire lengths never
 control an allocation.
+
+### 13.2 Logical message encodings
+
+The following constants are normative:
+
+| Component | Size |
+|---|---:|
+| Random value | 32 bytes |
+| SHA-384 identity fingerprint | 48 bytes |
+| X25519 public key | 32 bytes |
+| ML-KEM-768 encapsulation key | 1,184 bytes |
+| ML-KEM-768 ciphertext | 1,088 bytes |
+| Ed25519 public key | 32 bytes |
+| Ed25519 signature | 64 bytes |
+| ML-DSA-65 public key | 1,952 bytes |
+| ML-DSA-65 signature | 3,309 bytes |
+| HMAC-SHA-384 Finished value | 48 bytes |
+
+The identity fingerprint is:
+
+```text
+SHA-384("OGTP/1 identity\x00" || Ed25519 public key || ML-DSA-65 public key)
+```
+
+#### HELLO
+
+```text
+Client Random[32] | Identity Fingerprint[48] | Cipher Bitmap u16
+                  | Capabilities u32 | Max UDP Payload u16
+                  | Max Paths u8 | Reserved u8=0
+```
+
+HELLO is exactly 90 bytes. Cipher Bitmap bit 0 offers AES-256-GCM-SHA384 and
+bit 1 offers ChaCha20-Poly1305-SHA384. At least one known bit is required.
+Capability bit 0 requests multipath, bit 1 resume, and bit 2 periodic hybrid PQ
+rekey. Unknown capability bits are ignored. `Max UDP Payload` is at least 1,200
+and `Max Paths` is between 1 and 16.
+
+#### RETRY
+
+```text
+Server Random[32] | Cookie Length u16 | Opaque Cookie[16..256]
+```
+
+The cookie is an authenticated, encrypted server token. Its plaintext binds the
+source address and port, both random values, the offered version, both
+Connection IDs, an expiry, and a hash of canonical HELLO. Its internal encoding
+is server-local and is never parsed by the initiator.
+
+#### INIT
+
+```text
+Canonical HELLO[90] | Server Random[32] | Cookie Length u16
+                    | Opaque Cookie[16..256] | X25519 Public Key[32]
+                    | ML-KEM-768 Encapsulation Key[1184]
+```
+
+HELLO is repeated so a stateless responder can reconstruct the transcript after
+validating its cookie. INIT is 1,340 bytes plus the cookie and therefore uses
+long-header fragmentation at the baseline MTU.
+
+#### RESPONSE
+
+```text
+Selected Cipher u16 | Negotiated Capabilities u32 | Max UDP Payload u16
+                    | Max Paths u8 | Reserved u8=0
+                    | Responder Identity Fingerprint[48]
+                    | X25519 Public Key[32] | ML-KEM-768 Ciphertext[1088]
+                    | Encrypted Auth Length u16=5421
+                    | Encrypted Responder Identity Auth[5421]
+```
+
+Selected Cipher is `0x0001` for AES-256-GCM-SHA384 or `0x0002` for
+ChaCha20-Poly1305-SHA384. Negotiated capabilities MUST be a subset of HELLO.
+RESPONSE is exactly 6,601 bytes.
+
+#### FINISH
+
+```text
+Encrypted Auth Length u16=5421 | Encrypted Initiator Identity Auth[5421]
+```
+
+FINISH is exactly 5,423 bytes.
+
+#### Identity Auth plaintext
+
+Before AEAD sealing, both authentication blocks are exactly 5,405 bytes:
+
+```text
+Ed25519 Public Key[32] | ML-DSA-65 Public Key[1952]
+                       | Ed25519 Signature[64]
+                       | ML-DSA-65 Signature[3309]
+                       | Finished HMAC-SHA-384[48]
+```
+
+The AEAD adds a 16-byte tag, producing the 5,421-byte encrypted value carried
+by RESPONSE and FINISH. A receiver verifies that the two public keys hash to
+the identity fingerprint before verifying either signature.
 
 ## 14. Multipath
 
@@ -362,9 +462,8 @@ and reject structurally invalid packet forms.
 
 ## 17. Release blockers
 
-- Exact field registry inside HELLO, RETRY, INIT, RESPONSE, and FINISH messages.
 - Final header-protection construction and published test vectors.
-- Normative HKDF labels and AEAD usage limits.
+- Algorithm-specific AEAD usage limits.
 - Canonical manifest and dual-signature encoding.
 - Bit-exact CREDIT, COMMIT, and RESUME values.
 - Coupled multipath congestion controller.

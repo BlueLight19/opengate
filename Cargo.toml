@@ -10,6 +10,10 @@ publish = false
 name = "ogtp"
 path = "src/lib.rs"
 
+[dev-dependencies]
+hmac = "0.12.1"
+sha2 = "0.10.9"
+
 [lints.rust]
 unsafe_code = "forbid"
 

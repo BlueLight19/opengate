@@ -25,6 +25,7 @@ This code is not production-ready and must not yet protect sensitive data.
 ## Documents
 
 - [`SPEC.md`](docs/SPEC.md) — wire format and state machine;
+- [`CRYPTO.md`](docs/CRYPTO.md) — transcript, hybrid key schedule, and labels;
 - [`THREAT_MODEL.md`](docs/THREAT_MODEL.md) — guarantees, adversaries, and limits;
 - [`BENCHMARKS.md`](docs/BENCHMARKS.md) — RAM/CPU budgets and measurement plan.
 
@@ -37,6 +38,5 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-The next milestones are exact handshake-message fields, a deterministic
-loss/reordering simulator, then integration of an audited cryptographic
-provider behind a separate interface.
+The next milestones are a deterministic loss/reordering simulator, an audited
+cryptographic-provider interface, and packet protection test vectors.
