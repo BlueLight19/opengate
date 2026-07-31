@@ -46,7 +46,9 @@ The initial unit scenarios prove:
 
 1. the exact interaction of loss, duplication, and induced reordering;
 2. failover to a lower-latency path while preserving packets already in flight
-   on the disabled path.
+   on the disabled path;
+3. packet-threshold loss detection, reinjection on an alternate path, target
+   acknowledgement, and subsequent late arrival of the original packet.
 
 ## Deliberate limitations
 

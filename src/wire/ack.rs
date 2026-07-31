@@ -153,6 +153,29 @@ impl<'a> AckFrame<'a> {
             remaining: self.encoded_ranges,
         }
     }
+
+    /// Returns whether this frame acknowledges `packet_number`.
+    ///
+    /// The lookup walks at most 33 canonical ranges and performs no allocation.
+    #[must_use]
+    pub fn acknowledges(self, packet_number: u64) -> bool {
+        let mut range_end = self.largest_acked;
+        let mut range_start = range_end - (u64::from(self.first_range_length) - 1);
+        if (range_start..=range_end).contains(&packet_number) {
+            return true;
+        }
+        for range in self.additional_ranges() {
+            range_end = range_start - (u64::from(range.gap) + 1);
+            range_start = range_end - (u64::from(range.length) - 1);
+            if (range_start..=range_end).contains(&packet_number) {
+                return true;
+            }
+            if packet_number > range_end {
+                return false;
+            }
+        }
+        false
+    }
 }
 
 /// Iterator over borrowed ACK range bytes.
@@ -253,5 +276,23 @@ mod tests {
                 actual: ACK_BASE_LEN + 1,
             })
         );
+    }
+
+    #[test]
+    fn membership_lookup_handles_gaps_without_allocating() {
+        let ranges = [
+            AckRange { gap: 2, length: 4 },
+            AckRange { gap: 1, length: 2 },
+        ];
+        let mut output = [0_u8; 64];
+        let written = AckFrame::encode(100, 0, 3, &ranges, &mut output).expect("valid ACK");
+        let frame = AckFrame::decode(&output[..written]).expect("ACK decodes");
+
+        for packet_number in [98, 99, 100, 92, 93, 94, 95, 89, 90] {
+            assert!(frame.acknowledges(packet_number));
+        }
+        for packet_number in [101, 97, 96, 91, 88, 0] {
+            assert!(!frame.acknowledges(packet_number));
+        }
     }
 }

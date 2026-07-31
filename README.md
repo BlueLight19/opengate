@@ -23,6 +23,8 @@ The current `0.2` version is an early design and codec milestone:
 - provider-neutral in-place packet-protection orchestration with enforced AEAD
   usage limits;
 - reproducible AES-256-GCM and ChaCha20-Poly1305 packet vectors;
+- fixed-capacity sent-packet recovery with integer RTT estimation, ACK-driven
+  loss detection, and deterministic multipath reinjection selection;
 - an opt-in deterministic multipath fault simulator.
 
 This code is not production-ready and must not yet protect sensitive data.
@@ -33,6 +35,7 @@ This code is not production-ready and must not yet protect sensitive data.
 - [`CRYPTO.md`](docs/CRYPTO.md) — transcript, hybrid key schedule, and labels;
 - [`THREAT_MODEL.md`](docs/THREAT_MODEL.md) — guarantees, adversaries, and limits;
 - [`BENCHMARKS.md`](docs/BENCHMARKS.md) — RAM/CPU budgets and measurement plan;
+- [`RECOVERY.md`](docs/RECOVERY.md) — bounded loss-recovery invariants;
 - [`SIMULATION.md`](docs/SIMULATION.md) — deterministic fault-model semantics.
 
 ## Development
@@ -45,6 +48,6 @@ cargo test --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-The next milestones are loss recovery and congestion-control state machines,
+The next milestones are PTO/persistent-congestion handling, CUBIC and pacing,
 an audited cryptographic-provider adapter, and a batched UDP runtime with
 measured allocation/copy budgets.

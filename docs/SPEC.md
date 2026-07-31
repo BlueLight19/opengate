@@ -166,6 +166,44 @@ ACKs are path-local. They confirm network receipt and authentication, not
 durable storage. Old ranges MAY be discarded to respect the advertised memory
 budget.
 
+An ACK-eliciting packet is acknowledged no later than 25 ms after receipt. A
+receiver SHOULD acknowledge at least every second ACK-eliciting packet and
+SHOULD acknowledge immediately when a newly received packet creates or fills a
+gap. `ACK Delay usec` is measured from packet receipt until ACK transmission.
+The sender caps the reported delay at 25,000 microseconds before RTT
+adjustment. An authenticated ACK whose `Largest Acked` exceeds the largest
+packet sent on that path is a protocol violation.
+
+Each path maintains independent integer RTT state. Before the first sample,
+the initial RTT is 333 ms. For a newly acknowledged `Largest Acked` packet:
+
+```text
+raw_rtt = acknowledgement_time - send_time
+min_rtt = min(min_rtt, raw_rtt)
+adjusted_rtt = raw_rtt - min(reported_ack_delay, 25 ms)
+```
+
+The delay is subtracted only when the result would not fall below `min_rtt`.
+The first adjusted sample initializes `smoothed_rtt` and
+`rtt_variance = adjusted_rtt / 2`. Later samples use integer updates:
+
+```text
+rtt_variance = (3 * rtt_variance + abs(smoothed_rtt - adjusted_rtt)) / 4
+smoothed_rtt = (7 * smoothed_rtt + adjusted_rtt) / 8
+```
+
+After an authenticated ACK, an older outstanding packet is lost when either:
+
+1. `Largest Acked - Packet Number >= 3`; or
+2. it was sent at least `9/8 * max(latest_rtt, smoothed_rtt)` ago and a newer
+   packet has been acknowledged.
+
+The time threshold has a minimum granularity of 1 ms. Loss processing removes
+packet metadata immediately and emits only stable DATA/control recovery tokens;
+it does not retain payload bytes. Every retransmission is a new packet on the
+selected path, uses that path's next packet number and keys, and is sealed
+again. Ciphertext, nonce, and packet number MUST NOT be reused.
+
 ## 9. CONTROL packets
 
 CONTROL plaintext is a sequence of canonical TLVs:
@@ -438,6 +476,21 @@ treating paths that share a bottleneck as fully independent capacity. CUBIC
 with pacing is the initial profile; a coupled multipath controller will be
 specified after measurements.
 
+For a recovery token, the initial path selector minimizes the saturating
+integer estimate:
+
+```text
+delivery_delay = pacer_delay + smoothed_rtt/2
+               + ceil(queued_bytes * 1_000_000 / estimated_rate_bytes_per_sec)
+               + loss_penalty
+```
+
+Only validated, sendable paths with a non-zero rate estimate are eligible.
+The original path remains eligible if healthy; equal estimates are resolved by
+the lowest path identifier. Completion state is keyed by the stable recovery
+token so a late original packet or ACK cannot complete or retransmit the same
+fragment twice.
+
 Address discovery, rendezvous, hole punching, and relay operation are separate
 services. A relay carries opaque OGTP datagrams and owns no session key.
 
@@ -465,9 +518,9 @@ and reject structurally invalid packet forms.
 
 ## 17. Release blockers
 
-- Final header-protection construction and published test vectors.
-- Algorithm-specific AEAD usage limits.
+- Independent cryptographic audit and cross-implementation validation.
 - Canonical manifest and dual-signature encoding.
 - Bit-exact CREDIT, COMMIT, and RESUME values.
+- PTO, persistent-congestion, CUBIC, and pacing integration.
 - Coupled multipath congestion controller.
 - Relay negotiation and behavior.

@@ -11,6 +11,7 @@ pub mod flow;
 pub mod handshake;
 pub mod kdf;
 pub mod protection;
+pub mod recovery;
 #[cfg(any(test, feature = "simulator"))]
 pub mod simulator;
 pub mod transcript;
