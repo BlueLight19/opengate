@@ -487,6 +487,14 @@ RETRY cookie before allocating an INIT reassembly slot. Reassembly uses a fixed
 16 KiB slot plus a bounded receipt bitmap; unauthenticated wire lengths never
 control an allocation.
 
+The implemented receive contract is defined in
+[`HANDSHAKE_STATE.md`](HANDSHAKE_STATE.md). A slot adds a fixed 2,048-byte
+receipt bitmap and metadata. `INIT` admission parses fragment zero and exposes
+the complete cookie before any slot is reserved. Identical overlaps are
+idempotent; conflicting overlaps or changed message metadata clear the local
+slot. The runtime supplies fixed pool capacity, post-cookie quotas, deadlines,
+and terminal cleanup.
+
 ### 13.2 Logical message encodings
 
 The following constants are normative:
@@ -750,3 +758,5 @@ and reject structurally invalid packet forms.
 - Relay negotiation and behavior.
 - Audited concrete authentication provider, bounded storage/Merkle integration,
   and transfer-control timeout wiring in the batched UDP runtime.
+- Authenticated stateless-cookie provider plus handshake admission quotas,
+  deadlines, AEAD opening, and state lifecycle wiring in that runtime.

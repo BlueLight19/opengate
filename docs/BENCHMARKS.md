@@ -142,6 +142,9 @@ Performance alone is insufficient. The harness includes:
   chunk ranges;
 - millions of unknown DCIDs;
 - incomplete handshake fragments;
+- valid-cookie floods that exhaust fixed handshake slots and deadlines;
+- duplicate, conflicting-overlap, metadata-changing, and out-of-bounds
+  handshake fragments;
 - incomplete, duplicated, overlapping, and conflicting manifest fragments;
 - manifest-pool and normalized-range capacity exhaustion;
 - replayed, interrupted, and discontinuous RESUME snapshot windows;

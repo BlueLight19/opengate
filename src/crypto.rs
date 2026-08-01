@@ -29,3 +29,27 @@ pub trait Sha384Provider {
     /// Returns a provider-specific error when hashing cannot be completed.
     fn finish_sha384(&self, context: Self::Context) -> Result<Sha384Digest, Self::Error>;
 }
+
+/// SHA-384 provider whose running contexts can be forked transactionally.
+///
+/// Handshake transcript state uses a fork as a candidate update and commits it
+/// only after every required snapshot succeeds.
+pub trait ForkableSha384Provider: Sha384Provider {
+    /// Creates an independent context with exactly the same running hash state.
+    ///
+    /// # Errors
+    ///
+    /// Returns a provider-specific error when the context cannot be cloned or
+    /// exported safely.
+    fn fork_sha384(&self, context: &Self::Context) -> Result<Self::Context, Self::Error>;
+
+    /// Returns the current digest without consuming or modifying `context`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a provider-specific fork or finalization error.
+    fn snapshot_sha384(&self, context: &Self::Context) -> Result<Sha384Digest, Self::Error> {
+        let snapshot = self.fork_sha384(context)?;
+        self.finish_sha384(snapshot)
+    }
+}

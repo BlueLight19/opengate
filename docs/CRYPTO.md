@@ -63,6 +63,10 @@ All transcript integers use network byte order. Implementations SHOULD update a
 running SHA-384 state and MUST NOT retain full messages after they are no longer
 needed.
 
+The implemented fixed-state transition and rollback contract is specified in
+[`HANDSHAKE_STATE.md`](HANDSHAKE_STATE.md). It forks the running hash for each
+candidate transition and commits only after all required snapshots succeed.
+
 Named transcript hashes are:
 
 ```text
@@ -300,6 +304,8 @@ Before production use, this schedule requires:
 
 - independent cryptographic review;
 - complete encrypted-handshake vectors and real Ed25519/ML-DSA negative tests;
+- authenticated-cookie and batched-runtime integration of the bounded
+  handshake state;
 - enforcement of algorithm-specific AEAD usage limits;
 - constant-time key handling and comparison;
 - erasure tests for ephemeral, handshake, and previous-epoch secrets;

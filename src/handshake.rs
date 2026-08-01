@@ -140,10 +140,23 @@ impl Hello {
 }
 
 /// Borrowed RETRY message carrying a stateless cookie.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Retry<'a> {
     pub server_random: [u8; RANDOM_LEN],
     pub cookie: &'a [u8],
+}
+
+impl fmt::Debug for Retry<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Retry")
+            .field("server_random", &"<redacted>")
+            .field(
+                "cookie",
+                &format_args!("<redacted, {} bytes>", self.cookie.len()),
+            )
+            .finish()
+    }
 }
 
 impl<'a> Retry<'a> {
@@ -192,13 +205,32 @@ impl<'a> Retry<'a> {
 }
 
 /// Borrowed INIT message containing the initiator hybrid key share.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Init<'a> {
     pub hello: Hello,
     pub server_random: [u8; RANDOM_LEN],
     pub cookie: &'a [u8],
     pub x25519_public_key: [u8; X25519_PUBLIC_KEY_LEN],
     pub ml_kem_encapsulation_key: &'a [u8],
+}
+
+impl fmt::Debug for Init<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Init")
+            .field("hello", &"<redacted>")
+            .field("server_random", &"<redacted>")
+            .field(
+                "cookie",
+                &format_args!("<redacted, {} bytes>", self.cookie.len()),
+            )
+            .field("x25519_public_key", &"<redacted>")
+            .field(
+                "ml_kem_encapsulation_key",
+                &format_args!("<redacted, {} bytes>", self.ml_kem_encapsulation_key.len()),
+            )
+            .finish()
+    }
 }
 
 impl<'a> Init<'a> {
@@ -280,7 +312,7 @@ impl<'a> Init<'a> {
 }
 
 /// Borrowed RESPONSE containing the responder key share and encrypted identity.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Response<'a> {
     pub selected_cipher_suite: CipherSuite,
     pub negotiated_capabilities: u32,
@@ -290,6 +322,28 @@ pub struct Response<'a> {
     pub x25519_public_key: [u8; X25519_PUBLIC_KEY_LEN],
     pub ml_kem_ciphertext: &'a [u8],
     pub encrypted_identity_auth: &'a [u8],
+}
+
+impl fmt::Debug for Response<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Response")
+            .field("selected_cipher_suite", &self.selected_cipher_suite)
+            .field("negotiated_capabilities", &self.negotiated_capabilities)
+            .field("max_udp_payload", &self.max_udp_payload)
+            .field("max_paths", &self.max_paths)
+            .field("identity_fingerprint", &"<redacted>")
+            .field("x25519_public_key", &"<redacted>")
+            .field(
+                "ml_kem_ciphertext",
+                &format_args!("<redacted, {} bytes>", self.ml_kem_ciphertext.len()),
+            )
+            .field(
+                "encrypted_identity_auth",
+                &format_args!("<redacted, {} bytes>", self.encrypted_identity_auth.len()),
+            )
+            .finish()
+    }
 }
 
 impl<'a> Response<'a> {
@@ -362,9 +416,21 @@ impl<'a> Response<'a> {
 }
 
 /// Borrowed FINISH message carrying initiator authentication ciphertext.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Finish<'a> {
     pub encrypted_identity_auth: &'a [u8],
+}
+
+impl fmt::Debug for Finish<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Finish")
+            .field(
+                "encrypted_identity_auth",
+                &format_args!("<redacted, {} bytes>", self.encrypted_identity_auth.len()),
+            )
+            .finish()
+    }
 }
 
 impl<'a> Finish<'a> {
@@ -405,13 +471,26 @@ impl<'a> Finish<'a> {
 }
 
 /// Borrowed plaintext sealed inside RESPONSE and FINISH.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct IdentityAuth<'a> {
     pub ed25519_public_key: [u8; ED25519_PUBLIC_KEY_LEN],
     pub ml_dsa_public_key: &'a [u8],
     pub ed25519_signature: [u8; ED25519_SIGNATURE_LEN],
     pub ml_dsa_signature: &'a [u8],
     pub finished_mac: [u8; FINISHED_MAC_LEN],
+}
+
+impl fmt::Debug for IdentityAuth<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("IdentityAuth")
+            .field("ed25519_public_key", &"<redacted>")
+            .field("ml_dsa_public_key", &"<redacted>")
+            .field("ed25519_signature", &"<redacted>")
+            .field("ml_dsa_signature", &"<redacted>")
+            .field("finished_mac", &"<redacted>")
+            .finish()
+    }
 }
 
 impl<'a> IdentityAuth<'a> {
@@ -650,6 +729,9 @@ mod tests {
         let mut retry_bytes = [0_u8; RETRY_FIXED_LEN + 48];
         let retry_len = retry.encode(&mut retry_bytes).expect("RETRY encodes");
         assert_eq!(Retry::decode(&retry_bytes[..retry_len]), Ok(retry));
+        let retry_debug = format!("{retry:?}");
+        assert!(retry_debug.contains("<redacted, 48 bytes>"));
+        assert!(!retry_debug.contains("51, 51"));
 
         let ml_kem_key = [0x55; ML_KEM_768_ENCAPSULATION_KEY_LEN];
         let init = Init {
@@ -704,6 +786,9 @@ mod tests {
         let mut output = [0_u8; IDENTITY_AUTH_LEN];
         assert_eq!(auth.encode(&mut output), Ok(IDENTITY_AUTH_LEN));
         assert_eq!(IdentityAuth::decode(&output), Ok(auth));
+        let debug = format!("{auth:?}");
+        assert!(debug.contains("finished_mac: \"<redacted>\""));
+        assert!(!debug.contains("255, 255"));
     }
 
     #[test]

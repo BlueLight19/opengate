@@ -29,6 +29,8 @@ The current `0.2` version is an early design and codec milestone:
   whose RAM use is independent of object size;
 - fail-closed hybrid peer and manifest authentication orchestration with
   trust-anchor binding, Finished HMAC, Ed25519, and ML-DSA-65 gates;
+- stateless `HELLO`/`RETRY` parsing, pre-allocation `INIT` cookie admission,
+  fixed-pool handshake reassembly, and transactional transcript snapshots;
 - canonical handshake, transcript, and HKDF serializers;
 - provider-neutral in-place packet-protection orchestration with enforced AEAD
   usage limits;
@@ -53,6 +55,8 @@ This code is not production-ready and must not yet protect sensitive data.
 - [`CRYPTO.md`](docs/CRYPTO.md) — transcript, hybrid key schedule, and labels;
 - [`AUTHENTICATION.md`](docs/AUTHENTICATION.md) — atomic dual-signature identity
   and manifest verification contract;
+- [`HANDSHAKE_STATE.md`](docs/HANDSHAKE_STATE.md) — stateless admission,
+  fixed-memory reassembly, and transactional transcript state;
 - [`THREAT_MODEL.md`](docs/THREAT_MODEL.md) — guarantees, adversaries, and limits;
 - [`BENCHMARKS.md`](docs/BENCHMARKS.md) — RAM/CPU budgets and measurement plan;
 - [`CONGESTION.md`](docs/CONGESTION.md) — CUBIC, PTO, and pacing profile;

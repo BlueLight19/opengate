@@ -41,15 +41,17 @@ handshake state machine must have:
 1. validated the RETRY cookie and amplification limit where applicable;
 2. reassembled the logical handshake message in a fixed buffer;
 3. authenticated and decrypted its AEAD ciphertext;
-4. constructed the exact named transcript snapshots from `CRYPTO.md`;
+4. obtained the exact named transcript snapshots from the transactional state
+   in [`HANDSHAKE_STATE.md`](HANDSHAKE_STATE.md);
 5. derived the direction- and role-correct Finished key;
 6. loaded an out-of-band trust-anchor fingerprint.
 
-The orchestration cannot prove that caller-supplied transcript hashes or keys
-came from the correct state-machine epoch. They are grouped in one borrowed
-`PeerAuthenticationContext` to reduce accidental role or snapshot mixing.
-Its `Debug` representation redacts both hashes, the Finished key, and
-fingerprints.
+The handshake state now constructs snapshots in canonical order and rolls back
+provider failures, but the authentication function still cannot prove that the
+caller paired them with the correct role-specific Finished key. The values are
+grouped in one borrowed `PeerAuthenticationContext` to reduce accidental role
+or epoch mixing. Its `Debug` representation redacts both hashes, the Finished
+key, and fingerprints.
 
 ## Fail-closed verification order
 
@@ -107,9 +109,11 @@ handshake authentication. There is no per-verification heap allocation in the
 orchestration layer.
 
 `Debug` output for authentication contexts, installed identities, and verified
-manifests is explicitly redacted. Provider errors are still provider-owned;
-adapters must ensure their error values never include keys, MACs, plaintext,
-complete transcript hashes, or global object hashes.
+manifests is explicitly redacted. The borrowed `RETRY`, `INIT`, `RESPONSE`,
+`FINISH`, and `IdentityAuth` codec values also use redacted `Debug`
+implementations. Provider errors are still provider-owned; adapters must ensure
+their error values never include keys, MACs, plaintext, complete transcript
+hashes, or global object hashes.
 
 ## Tests and remaining production work
 
@@ -120,5 +124,6 @@ manifest signer binding, dual manifest signatures, and debug redaction.
 
 Production work still includes a concrete audited provider, real Ed25519 and
 ML-DSA-65 known-answer and negative vectors, full encrypted-handshake vectors,
-transcript-snapshot state integration, key erasure, stateful fuzzing, and
-cryptographic CPU benchmarking under invalid authenticated traffic.
+AEAD/runtime integration around the implemented transcript state, key erasure,
+stateful fuzzing, and cryptographic CPU benchmarking under invalid
+authenticated traffic.
