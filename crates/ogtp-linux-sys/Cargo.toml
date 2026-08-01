@@ -1,0 +1,21 @@
+[package]
+name = "ogtp-linux-sys"
+version = "0.1.0"
+edition = "2024"
+description = "Auditable Linux sendmmsg boundary for OGTP"
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[lib]
+name = "ogtp_linux_sys"
+path = "src/lib.rs"
+
+[dependencies]
+libc = "0.2.189"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

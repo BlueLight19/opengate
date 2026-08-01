@@ -13,7 +13,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV
 
 use super::{
     IpAddress, ReceiveMetadata, ReceiveQueue, RuntimeQueueError, TransmitMetadata, TransmitQueue,
-    UdpEndpoint,
+    UdpCapabilities, UdpCapability, UdpEndpoint,
 };
 use crate::ecn::EcnCodepoint;
 
@@ -22,68 +22,6 @@ use crate::ecn::EcnCodepoint;
 /// The extra byte used to detect a datagram above the configured OGTP limit is
 /// not included. IPv6 jumbograms are outside the OGTP/1 portable profile.
 pub const MAX_PORTABLE_DATAGRAM_SIZE: usize = 65_527;
-
-/// One socket-adapter feature that callers must negotiate explicitly.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u16)]
-pub enum PortableUdpCapability {
-    ExactReceiveDestination,
-    ReceiveInterface,
-    ReceiveEcn,
-    KernelReceiveTimestamp,
-    UdpGro,
-    SourceSelection,
-    TransmitInterface,
-    TransmitEcn,
-    UdpGso,
-    BatchedSyscalls,
-    DeferredCompletion,
-}
-
-/// Compact set of features observable through one adapter instance.
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub struct PortableUdpCapabilities(u16);
-
-impl PortableUdpCapabilities {
-    const fn empty() -> Self {
-        Self(0)
-    }
-
-    const fn with(mut self, capability: PortableUdpCapability) -> Self {
-        self.0 |= 1 << capability as u16;
-        self
-    }
-
-    /// Returns whether this adapter supports `capability`.
-    #[must_use]
-    pub const fn contains(self, capability: PortableUdpCapability) -> bool {
-        self.0 & (1 << capability as u16) != 0
-    }
-}
-
-impl fmt::Debug for PortableUdpCapabilities {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut set = formatter.debug_set();
-        for capability in [
-            PortableUdpCapability::ExactReceiveDestination,
-            PortableUdpCapability::ReceiveInterface,
-            PortableUdpCapability::ReceiveEcn,
-            PortableUdpCapability::KernelReceiveTimestamp,
-            PortableUdpCapability::UdpGro,
-            PortableUdpCapability::SourceSelection,
-            PortableUdpCapability::TransmitInterface,
-            PortableUdpCapability::TransmitEcn,
-            PortableUdpCapability::UdpGso,
-            PortableUdpCapability::BatchedSyscalls,
-            PortableUdpCapability::DeferredCompletion,
-        ] {
-            if self.contains(capability) {
-                set.entry(&capability);
-            }
-        }
-        set.finish()
-    }
-}
 
 /// One nonblocking receive attempt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -264,10 +202,10 @@ impl PortableUdpSocket {
 
     /// Reports which metadata and acceleration features this backend exposes.
     #[must_use]
-    pub const fn capabilities(&self) -> PortableUdpCapabilities {
-        let capabilities = PortableUdpCapabilities::empty();
+    pub const fn capabilities(&self) -> UdpCapabilities {
+        let capabilities = UdpCapabilities::empty();
         if self.exact_local_endpoint {
-            capabilities.with(PortableUdpCapability::ExactReceiveDestination)
+            capabilities.with(UdpCapability::ExactReceiveDestination)
         } else {
             capabilities
         }
@@ -371,6 +309,8 @@ impl PortableUdpSocket {
                     interface_index: None,
                     ecn: None,
                     received_at_micros: now_micros,
+                    kernel_timestamp_unix_nanos: None,
+                    socket_drop_count: None,
                     gro_segment_size: None,
                 },
             )
@@ -596,9 +536,9 @@ mod tests {
     fn receive_is_nonblocking_direct_bounded_and_metadata_explicit() {
         let receiver = PortableUdpSocket::bind(localhost(), 7, 1_200).expect("receiver");
         let capabilities = receiver.capabilities();
-        assert!(capabilities.contains(PortableUdpCapability::ExactReceiveDestination));
-        assert!(!capabilities.contains(PortableUdpCapability::ReceiveEcn));
-        assert!(!capabilities.contains(PortableUdpCapability::BatchedSyscalls));
+        assert!(capabilities.contains(UdpCapability::ExactReceiveDestination));
+        assert!(!capabilities.contains(UdpCapability::ReceiveEcn));
+        assert!(!capabilities.contains(UdpCapability::BatchedSyscalls));
         let sender = UdpSocket::bind(localhost()).expect("sender");
         sender
             .send_to(

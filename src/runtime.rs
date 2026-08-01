@@ -4,6 +4,8 @@
 //! bounded buffer queues, kernel-completion ownership, endpoint metadata, and
 //! monotonic timer queue needed by portable and platform-specific adapters.
 
+#[cfg(all(feature = "linux-udp", target_os = "linux"))]
+pub mod linux;
 pub mod portable;
 
 use core::fmt;
@@ -40,8 +42,80 @@ pub struct ReceiveMetadata {
     /// Received IP ECN field, or `None` when it was not observed.
     pub ecn: Option<EcnCodepoint>,
     pub received_at_micros: u64,
+    /// Kernel realtime timestamp in Unix nanoseconds, when available.
+    pub kernel_timestamp_unix_nanos: Option<u64>,
+    /// Cumulative socket RX overflow counter, when available.
+    pub socket_drop_count: Option<u32>,
     /// UDP GRO segment size. `None` means the buffer contains one datagram.
     pub gro_segment_size: Option<NonZeroU16>,
+}
+
+/// One socket-adapter feature that callers must negotiate explicitly.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u16)]
+pub enum UdpCapability {
+    ExactReceiveDestination,
+    ReceiveInterface,
+    ReceiveEcn,
+    KernelReceiveTimestamp,
+    ReceiveDropCounter,
+    UdpGro,
+    SourceSelection,
+    TransmitInterface,
+    TransmitEcn,
+    UdpGso,
+    BatchedSyscalls,
+    DeferredCompletion,
+}
+
+/// Compact socket-adapter capability set.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct UdpCapabilities(u16);
+
+impl UdpCapabilities {
+    /// Creates an empty capability set.
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    /// Returns a set with `capability` enabled.
+    #[must_use]
+    pub const fn with(mut self, capability: UdpCapability) -> Self {
+        self.0 |= 1 << capability as u16;
+        self
+    }
+
+    /// Returns whether this adapter supports `capability`.
+    #[must_use]
+    pub const fn contains(self, capability: UdpCapability) -> bool {
+        self.0 & (1 << capability as u16) != 0
+    }
+}
+
+impl fmt::Debug for UdpCapabilities {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut set = formatter.debug_set();
+        for capability in [
+            UdpCapability::ExactReceiveDestination,
+            UdpCapability::ReceiveInterface,
+            UdpCapability::ReceiveEcn,
+            UdpCapability::KernelReceiveTimestamp,
+            UdpCapability::ReceiveDropCounter,
+            UdpCapability::UdpGro,
+            UdpCapability::SourceSelection,
+            UdpCapability::TransmitInterface,
+            UdpCapability::TransmitEcn,
+            UdpCapability::UdpGso,
+            UdpCapability::BatchedSyscalls,
+            UdpCapability::DeferredCompletion,
+        ] {
+            if self.contains(capability) {
+                set.entry(&capability);
+            }
+        }
+        set.finish()
+    }
 }
 
 /// Routing and ancillary metadata for one outgoing UDP buffer.
@@ -1565,6 +1639,8 @@ mod tests {
             interface_index: Some(4),
             ecn: Some(EcnCodepoint::Ect0),
             received_at_micros: 5,
+            kernel_timestamp_unix_nanos: None,
+            socket_drop_count: None,
             gro_segment_size: segment_size.and_then(NonZeroU16::new),
         }
     }

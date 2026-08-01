@@ -67,7 +67,8 @@ The protocol library does not manipulate IP headers. A production runtime must:
 - call the receive counter only after authentication and duplicate rejection;
 - preserve path separation when batching or steering datagrams.
 
-Linux integration is expected to use `IP_TOS`/`IPV6_TCLASS` for transmission
-and `IP_RECVTOS`/`IPV6_RECVTCLASS` control messages for reception. Exact kernel,
-GSO, GRO, tunneling, and hardware-offload behavior remains a measurement and
-interoperability requirement rather than a completed runtime claim.
+The opt-in Linux adapter uses per-batch `IP_TOS`/`IPV6_TCLASS` control messages
+for transmission and `IP_RECVTOS`/`IPV6_RECVTCLASS` control messages for
+reception. Exact behavior across kernel versions, GSO/GRO, tunnels, and
+hardware offloads remains a measurement and interoperability requirement, not
+a production-readiness claim.

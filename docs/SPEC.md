@@ -769,9 +769,13 @@ ownership, GRO/GSO metadata, and bounded monotonic timer heap are implemented
 as described in [`RUNTIME.md`](RUNTIME.md). A safe nonblocking standard-library
 socket adapter provides the portable fallback with explicit capability gaps.
 The fixed all-or-nothing RX/TX batch ownership required by multishot and
-multi-message syscalls is also implemented. Linux ancillary-data parsing,
-actual batched syscalls, and capability negotiation remain outside that
-adapter.
+multi-message syscalls is also implemented. The opt-in Linux adapter performs
+nonblocking `recvmmsg` directly into fixed queue buffers and extracts packet
+information, receiving interface, ECN, nanosecond kernel timestamps, socket
+drop counters, and UDP GRO metadata under strict capability negotiation.
+The same adapter groups homogeneous source/interface/ECN/GSO metadata into
+allocation-free `sendmmsg` calls and resolves accepted prefixes exactly. The
+Linux `io_uring` path remains incomplete.
 
 The recommended profile is a userspace engine:
 

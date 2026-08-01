@@ -62,6 +62,11 @@ The current `0.2` version is an early design and codec milestone:
 - exact compile-time RX/TX batches with all-or-nothing reservation, safe
   disjoint buffer borrowing, FIFO extraction, and per-element resolution of
   partial kernel results without allocation or payload copies;
+- an opt-in Linux `recvmmsg`/`sendmmsg` path with startup-preallocated syscall
+  descriptors, direct fixed-slot I/O, strict capability setup, IPv4/IPv6
+  destination/interface and ECN control, nanosecond kernel timestamps,
+  socket-drop counters, UDP GRO/GSO, exact partial-batch ownership, and an
+  isolated allocation-free TX FFI boundary;
 - bounded PTO and persistent-congestion state, byte-counted CUBIC, and a
   nanosecond integer pacer for each path;
 - allocation-free HyStart++ with Conservative Slow Start and packet-number
@@ -128,6 +133,5 @@ cargo clippy --all-targets --all-features -- -D warnings
 The next milestones are independent review or replacement of the concrete
 post-quantum provider, official ML-DSA/ML-KEM differential vectors, independent
 consumption of the published encrypted-handshake vector, physical shared-
-bottleneck validation, a batched platform UDP adapter with destination,
-interface, ECN, and timestamp ancillary data, a capability-gated Linux
-`io_uring` backend, and measured allocation/copy budgets.
+bottleneck validation, fixed connection/DCID sharding, a capability-gated
+Linux `io_uring` backend, and measured allocation/copy budgets.

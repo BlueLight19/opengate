@@ -1,11 +1,12 @@
 # OGTP/1 Bounded UDP Runtime Core
 
-Status: **draft 0.3 portable runtime and standard UDP adapter contract**.
+Status: **draft 0.5 portable runtime and Linux batched-I/O contract**.
 
 This document defines the fixed-capacity boundary between OGTP protocol state
 and a UDP socket implementation. The fixed-resource implementation is in
 `src/runtime.rs`; the safe standard-library adapter is in
-`src/runtime/portable.rs`. The core performs no system calls, owns no socket,
+`src/runtime/portable.rs`, and the opt-in Linux receive adapter is in
+`src/runtime/linux.rs`. The core performs no system calls, owns no socket,
 starts no task, and allocates no heap memory internally.
 
 The intended deployment model gives each connection shard to one event-loop
@@ -85,9 +86,11 @@ segment sizes larger than the committed length. These failures release and
 clear the reservation transactionally.
 
 Receive metadata retains the source endpoint, socket identifier, monotonic
-receive timestamp, and an optional UDP GRO segment size. Exact destination,
-interface, and ECN observations use `Option`; an adapter must return `None`
-rather than inventing ancillary data it could not observe.
+receive timestamp, optional kernel Unix-nanosecond timestamp, optional
+cumulative socket-drop counter, and optional UDP GRO segment size. Exact
+destination, interface, ECN, kernel timestamp, and drop-counter observations
+use `Option`; an adapter must return `None` rather than inventing ancillary
+data it could not observe.
 `ReceivedDatagramView::segments` returns the original datagrams in order
 without allocating or copying; the final segment may be shorter.
 
@@ -120,8 +123,9 @@ single-datagram path handles the tail.
 
 Batch tokens are non-`Copy`, non-`Clone`, redacted in `Debug`, and marked
 `must_use`. The batch layer allocates no memory, performs no payload copy, and
-contains no unsafe code. It is shared by future `recvmmsg`/`sendmmsg` and
-`io_uring` adapters rather than duplicating ownership logic per platform.
+contains no unsafe code. It is shared by the Linux `recvmmsg`/`sendmmsg`
+adapter and future `io_uring` adapters rather than duplicating ownership logic
+per platform.
 
 ## Safe standard-library adapter
 
@@ -156,6 +160,69 @@ The standard backend performs one syscall per attempt and reports batching,
 GRO/GSO, kernel timestamps, ECN, and deferred completion as unsupported. Those
 features belong to capability-gated platform backends; they must retain the
 same ownership outcomes.
+
+## Linux batched receive and transmit adapter
+
+The optional `linux-udp` Cargo feature exposes `LinuxUdpSocket<BATCH>` on
+Linux. Construction binds or adopts one socket, forces nonblocking mode,
+enables an explicit `LinuxUdpConfig` feature set, and preallocates `BATCH`
+`mmsghdr` records, peer-address slots, and per-message ancillary buffers.
+Those startup allocations are fixed for the adapter lifetime. The receive
+fast path creates no heap-backed batch list and copies no payload bytes.
+
+`try_receive_batch` atomically reserves exactly `BATCH` queue slots and passes
+their disjoint slices to one `recvmmsg` call. It uses
+`MSG_DONTWAIT | MSG_TRUNC` without a kernel timeout. `MSG_TRUNC` exposes the
+full datagram length for oversize rejection; omitting the timeout avoids the
+documented Linux behavior that can block after receiving fewer than the
+requested number of messages. `EAGAIN` returns every provably unwritten slot
+without clearing it. Other syscall failures conservatively clear every
+reservation because a partial write cannot be assumed absent.
+
+The adapter can request and decode IPv4/IPv6 packet information, receiving
+interface, ECN, `SO_TIMESTAMPNS`, `SO_RXQ_OVFL`, and UDP GRO segment size.
+Requested socket options are strict: construction fails instead of silently
+degrading when the running kernel rejects one. `UDP_SEGMENT` support is probed
+before GSO is advertised.
+
+Receive parsing fails closed. Empty or truncated datagrams, truncated control
+data, non-IP sources, conflicting duplicate ancillary values, invalid kernel
+timestamps, and impossible GRO sizes are cancelled and completely cleared.
+An ordinary datagram must fit the configured per-datagram limit; a GRO buffer
+may be larger only when its non-zero segment size fits that limit. Missing
+optional ancillary data remains `None`. A concrete non-wildcard bind is the
+only destination value synthesized without packet information.
+
+`try_transmit_batch` pops exactly `BATCH` ready buffers and submits their
+borrowed payload slices through one `sendmmsg`. Destinations and lengths may
+differ. Linux supplies one ancillary profile to the complete call, so source,
+interface, ECN, GSO segment size, and IP family must be homogeneous. Metadata
+rejection and future pacing deadlines requeue the entire batch. `EAGAIN` also
+requeues the entire batch. A partial kernel result completes only its accepted
+prefix and requeues the untouched suffix in order. A permanent local socket
+error discards the encoded buffers and leaves reliable rescheduling to the
+protocol recovery records.
+
+Ordinary TX payloads must fit the configured datagram limit. GSO aggregates
+must use a non-zero segment no larger than that limit or the aggregate, and a
+conservative maximum of 64 segments is enforced before entering the kernel.
+Source ports must equal the bound socket port. IPv4 scopes, mixed families,
+conflicting IPv6 scope/interface selections, wrong socket IDs, and mixed
+ancillary profiles fail closed without losing queue ownership.
+
+The main protocol crate remains `#![forbid(unsafe_code)]`. The small
+`crates/ogtp-linux-sys` dependency isolates the Linux `sendmmsg` FFI. It owns
+one startup-allocated header array, address array, I/O-vector array, and
+aligned maximum-size control buffer. Each call validates all safe inputs,
+rewrites the active headers and exact control length, invokes the synchronous
+syscall, and returns the accepted prefix lengths. The kernel retains no caller
+pointer. This avoids per-call allocation and avoids multiplying descriptor
+storage across ancillary combinations.
+
+The adapter is single-owner and deliberately not `Sync`. It reports
+capabilities through the same `UdpCapabilities` type as the portable backend,
+so protocol policy can require packet information, ECN, timestamping, drop
+accounting, batching, or offloads before enabling dependent behavior.
 
 ## Backpressure and kernel completion
 
@@ -226,17 +293,15 @@ discarded, and deferred completion outcomes.
 
 The next runtime slices are:
 
-1. a platform socket adapter with destination/interface/ECN/timestamp ancillary
-   extraction plus batched `recvmmsg`/`sendmmsg` where available;
-2. fixed connection/DCID ownership and bounded cross-thread completion rings;
-3. a Linux `io_uring` backend with registered buffers and capability-gated
+1. fixed connection/DCID ownership and bounded cross-thread completion rings;
+2. a Linux `io_uring` backend with registered buffers and capability-gated
    multishot receive, UDP GRO/GSO, and zero-copy completion handling;
-4. syscall, allocation, copy, cache, RSS, pinned-memory, and goodput
+3. syscall, allocation, copy, cache, RSS, pinned-memory, and goodput
    measurements from `BENCHMARKS.md`;
-5. stateful fuzzing of adapter errors, partial batches, completion reordering,
+4. stateful fuzzing of adapter errors, partial batches, completion reordering,
    and resource exhaustion.
 
-This runtime does not make OGTP production-ready. Full ancillary-data support,
-batched platform adapters, kernel capability detection, cancellation races,
-descriptor lifecycle, cross-platform conformance, and independent security
-review remain release blockers.
+This runtime does not make OGTP production-ready. Native Linux execution and
+offload conformance tests, cancellation races, descriptor lifecycle,
+cross-platform conformance, benchmarks, fuzzing, FFI review, and independent
+security review remain release blockers.
