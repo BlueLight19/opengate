@@ -103,6 +103,8 @@ analysis resistance.
   deterministic conflicting-overlap and rollback tests already exist.
 - Stateful fuzzing of bounded Merkle carries and irregular-tree finalization;
   deterministic reference-tree and provider-failure tests already exist.
+- Real-provider negative tests for Finished, Ed25519, and ML-DSA-65 plus
+  verification-order and authenticated-state installation fuzzing.
 - Continuous fuzzing of codecs, the state machine, and handshake fragmentation.
 - Differential tests between two independent implementations.
 - A formal handshake and key-update model, for example in Tamarin or ProVerif.

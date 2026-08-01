@@ -13,6 +13,8 @@ configuration, confidence interval, and baseline comparison.
 - Full memory copies per useful byte.
 - Peak userspace and kernel memory per connection.
 - SHA-384 cycles per chunk and Merkle internal-node cycles per object.
+- Finished, Ed25519, and ML-DSA-65 verification latency, including invalid
+  inputs rejected at each fail-closed gate.
 - p50, p95, and p99 completion time.
 - Energy per GiB on platforms exposing reliable counters.
 - Recovery time after complete path loss.

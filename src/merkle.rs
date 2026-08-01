@@ -2,40 +2,18 @@
 
 use core::fmt;
 
+use crate::crypto::Sha384Digest;
+pub use crate::crypto::Sha384Provider;
 use crate::manifest::{
     MERKLE_ROOT_LEN, ManifestError, ManifestHeader, OBJECT_ID_LEN, feed_chunk_leaf_input,
     feed_empty_root_input, feed_merkle_node_input,
 };
-use crate::transcript::TranscriptSink;
 
 /// SHA-384 digest size used throughout the object tree.
-pub type MerkleHash = [u8; MERKLE_ROOT_LEN];
+pub type MerkleHash = Sha384Digest;
 
 /// Number of perfect-subtree slots needed for every representable `u32` chunk count.
 pub const MAX_MERKLE_LEVELS: usize = u32::BITS as usize;
-
-/// Streaming SHA-384 operations required by the Merkle reducer.
-///
-/// A context receives canonical bytes through [`TranscriptSink`]. Providers
-/// may wrap software hashes, hardware engines, or opaque cryptographic handles.
-pub trait Sha384Provider {
-    type Context: TranscriptSink;
-    type Error;
-
-    /// Starts one independent SHA-384 operation.
-    ///
-    /// # Errors
-    ///
-    /// Returns a provider-specific error when a context cannot be created.
-    fn start_sha384(&self) -> Result<Self::Context, Self::Error>;
-
-    /// Finalizes one SHA-384 operation and returns exactly 48 bytes.
-    ///
-    /// # Errors
-    ///
-    /// Returns a provider-specific error when hashing cannot be completed.
-    fn finish_sha384(&self, context: Self::Context) -> Result<MerkleHash, Self::Error>;
-}
 
 /// Opaque result of hashing one geometrically valid object chunk.
 ///
@@ -483,6 +461,7 @@ mod tests {
     use super::*;
     use crate::handshake::IDENTITY_FINGERPRINT_LEN;
     use crate::manifest::{MERKLE_ROOT_LEN, MIN_CHUNK_SIZE};
+    use crate::transcript::TranscriptSink;
 
     struct Sha384Context(Sha384);
 

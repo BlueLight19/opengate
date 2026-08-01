@@ -156,7 +156,7 @@ manifests, COMMIT replay and completion regression, delta fragmentation beyond
 64 runs, range-capacity rollback, RESUME discontinuity, interrupted snapshots,
 and atomic replacement.
 
-Production work still includes continuous stateful fuzzing, audited signature
-and SHA-384 provider integration, bounded reorder/storage wiring around the
+Production work still includes continuous stateful fuzzing, an audited concrete
+signature/SHA-384 provider, bounded reorder/storage wiring around the
 implemented Merkle reducer, storage durability policy, timeout wiring, and
 measurement inside the batched UDP runtime.

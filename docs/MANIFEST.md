@@ -161,12 +161,14 @@ The implemented fixed-pool reassembler and transactional COMMIT/RESUME state
 are specified in [`TRANSFER_STATE.md`](TRANSFER_STATE.md). Canonical manifest
 decoding is intentionally separate from identity matching and signature
 verification; a runtime must complete both checks before installing the slot.
+The capability-producing dual-signature check is specified in
+[`AUTHENTICATION.md`](AUTHENTICATION.md).
 
 ## Remaining production work
 
 The codec and hashing inputs are provider-neutral. Production still requires:
 
-- an audited Ed25519 and ML-DSA-65 provider adapter;
+- an audited concrete Ed25519, ML-DSA-65, HMAC, and SHA-384 provider adapter;
 - event-loop admission, timeout, and signature-verification wiring around the
   implemented fixed-buffer reassembler;
 - event-loop integration of the implemented reducer with a bounded

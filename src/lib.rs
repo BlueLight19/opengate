@@ -7,7 +7,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod authentication;
 pub mod congestion;
+pub mod crypto;
 pub mod ecn;
 pub mod flow;
 pub mod handshake;

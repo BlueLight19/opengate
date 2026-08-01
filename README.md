@@ -27,6 +27,8 @@ The current `0.2` version is an early design and codec milestone:
   atomic windowed RESUME state with caller-selected range capacities;
 - provider-neutral Merkle hashing with a 32-level, 1,536-byte subtree stack
   whose RAM use is independent of object size;
+- fail-closed hybrid peer and manifest authentication orchestration with
+  trust-anchor binding, Finished HMAC, Ed25519, and ML-DSA-65 gates;
 - canonical handshake, transcript, and HKDF serializers;
 - provider-neutral in-place packet-protection orchestration with enforced AEAD
   usage limits;
@@ -49,6 +51,8 @@ This code is not production-ready and must not yet protect sensitive data.
 
 - [`SPEC.md`](docs/SPEC.md) — wire format and state machine;
 - [`CRYPTO.md`](docs/CRYPTO.md) — transcript, hybrid key schedule, and labels;
+- [`AUTHENTICATION.md`](docs/AUTHENTICATION.md) — atomic dual-signature identity
+  and manifest verification contract;
 - [`THREAT_MODEL.md`](docs/THREAT_MODEL.md) — guarantees, adversaries, and limits;
 - [`BENCHMARKS.md`](docs/BENCHMARKS.md) — RAM/CPU budgets and measurement plan;
 - [`CONGESTION.md`](docs/CONGESTION.md) — CUBIC, PTO, and pacing profile;

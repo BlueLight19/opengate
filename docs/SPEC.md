@@ -584,6 +584,8 @@ Ed25519 Public Key[32] | ML-DSA-65 Public Key[1952]
 The AEAD adds a 16-byte tag, producing the 5,421-byte encrypted value carried
 by RESPONSE and FINISH. A receiver verifies that the two public keys hash to
 the identity fingerprint before verifying either signature.
+The fail-closed provider and installation contract is defined in
+[`AUTHENTICATION.md`](AUTHENTICATION.md).
 
 ## 14. Multipath
 
@@ -746,5 +748,5 @@ and reject structurally invalid packet forms.
 - Physical shared-bottleneck fairness validation of the experimental
   CUBIC/LIA controller.
 - Relay negotiation and behavior.
-- Audited manifest-signature verification, bounded storage/Merkle integration,
+- Audited concrete authentication provider, bounded storage/Merkle integration,
   and transfer-control timeout wiring in the batched UDP runtime.

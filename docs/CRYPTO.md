@@ -100,6 +100,10 @@ identity_fingerprint =
 against the fingerprint carried earlier and against the out-of-band trust
 anchor. Failure of either comparison or signature aborts the handshake.
 
+The implemented provider boundary, fail-closed verification order, Finished
+gate, and authenticated-identity capability are specified in
+[`AUTHENTICATION.md`](AUTHENTICATION.md).
+
 ### Object manifest signatures
 
 Object manifests reuse the authenticated identity keys but have an independent
@@ -270,6 +274,8 @@ session before an authentication-failure limit. Counters never wrap.
 
 Machine-readable draft vectors are stored in:
 
+- [`authentication-v1.txt`](../test-vectors/authentication-v1.txt), covering
+  identity fingerprinting, handshake signature input, and Finished HMAC;
 - [`kdf-sha384-v1.txt`](../test-vectors/kdf-sha384-v1.txt), covering the key
   schedule and per-path derivation;
 - [`packet-protection-v1.txt`](../test-vectors/packet-protection-v1.txt),
@@ -293,7 +299,7 @@ AES block-cipher, and ChaCha20 implementations in `tests/packet_vectors.rs`.
 Before production use, this schedule requires:
 
 - independent cryptographic review;
-- vectors covering Finished MACs and complete authenticated handshakes;
+- complete encrypted-handshake vectors and real Ed25519/ML-DSA negative tests;
 - enforcement of algorithm-specific AEAD usage limits;
 - constant-time key handling and comparison;
 - erasure tests for ephemeral, handshake, and previous-epoch secrets;
