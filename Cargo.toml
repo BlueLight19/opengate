@@ -11,9 +11,11 @@ default = []
 rustcrypto-provider = [
     "dep:aes-gcm",
     "dep:chacha20poly1305",
+    "dep:ed25519-dalek",
     "dep:getrandom",
     "dep:hkdf",
     "dep:hmac",
+    "dep:ml-dsa",
     "dep:ml-kem",
     "dep:sha2",
     "dep:x25519-dalek",
@@ -27,9 +29,11 @@ path = "src/lib.rs"
 [dependencies]
 aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "zeroize"], optional = true }
 chacha20poly1305 = { version = "0.10.1", default-features = false, optional = true }
-getrandom = { version = "0.4.3", optional = true }
+ed25519-dalek = { version = "3.0.0", default-features = false, features = ["fast", "zeroize"], optional = true }
+getrandom = { version = "0.4.3", features = ["sys_rng"], optional = true }
 hkdf = { version = "0.12.4", default-features = false, optional = true }
 hmac = { version = "0.12.1", default-features = false, optional = true }
+ml-dsa = { version = "0.1.1", default-features = false, features = ["rand_core", "zeroize"], optional = true }
 ml-kem = { version = "0.3.2", default-features = false, features = ["hazmat", "zeroize"], optional = true }
 sha2 = { version = "0.10.9", default-features = false, optional = true }
 x25519-dalek = { version = "3.0.0", default-features = false, features = ["precomputed-tables", "static_secrets", "zeroize"], optional = true }

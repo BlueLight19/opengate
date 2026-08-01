@@ -166,9 +166,12 @@ The capability-producing dual-signature check is specified in
 
 ## Remaining production work
 
-The codec and hashing inputs are provider-neutral. Production still requires:
+The codec and hashing inputs are provider-neutral. The optional RustCrypto
+adapter now creates and verifies real Ed25519 + randomized ML-DSA-65 manifests,
+but production still requires:
 
-- an audited concrete Ed25519, ML-DSA-65, HMAC, and SHA-384 provider adapter;
+- independent audit or replacement of the concrete ML-DSA implementation and
+  cross-implementation FIPS 204 vectors;
 - event-loop admission, timeout, and signature-verification wiring around the
   implemented fixed-buffer reassembler;
 - event-loop integration of the implemented reducer with a bounded

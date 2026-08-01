@@ -1,11 +1,15 @@
 # OGTP/1 Hybrid Authentication Orchestration
 
-Status: **draft 0.2 implementation contract; external provider required**.
+Status: **draft 0.2 implementation contract; optional concrete provider
+available for interoperability**.
 
 This document specifies the fail-closed orchestration in
 `src/authentication.rs`. The library fixes inputs, validation order, trust
-binding, and atomic installation. It does not implement or claim to audit
-SHA-384, HMAC-SHA-384, Ed25519, or ML-DSA-65.
+binding, and atomic installation. The orchestration does not implement or
+claim to audit SHA-384, HMAC-SHA-384, Ed25519, or ML-DSA-65. The optional
+`rustcrypto-provider` feature implements this boundary as an interoperability
+and review target; it is specified in
+[`RUSTCRYPTO_AUTHENTICATION.md`](RUSTCRYPTO_AUTHENTICATION.md).
 
 Reproducible identity-fingerprint, contextualized-signature-input, and
 Finished-HMAC vectors are published in
@@ -28,9 +32,11 @@ must still reject non-canonical encodings, invalid points or keys, algorithm
 misuse, and backend failures according to the applicable standards. It must
 not accept a signature after an internal error.
 
-The default library has no concrete provider or cryptographic dependency. A
-production adapter requires independent review, constant-time analysis, known-
-answer tests, and version pinning.
+The default library has no concrete authentication provider. The optional
+RustCrypto adapter has explicit dependency versions, real end-to-end tests,
+strict Ed25519 verification, randomized ML-DSA-65 signing, and fixed-size key
+state. It remains non-production because its ML-DSA dependency is not
+independently audited and complete FIPS 204 differential coverage is pending.
 
 ## Required preconditions
 
@@ -123,13 +129,20 @@ AEAD success alone. The crypto schedule additionally requires the resulting
 
 ## Tests and remaining production work
 
-Deterministic tests cover independent fingerprint reproduction, exact
-contextual separation, successful atomic installation, every invalid-result
-short circuit, provider failures distinct from invalid authenticators,
-manifest signer binding, dual manifest signatures, and debug redaction.
+Provider-neutral deterministic tests cover independent fingerprint
+reproduction, exact contextual separation, successful atomic installation,
+every invalid-result short circuit, provider failures distinct from invalid
+authenticators, manifest signer binding, dual manifest signatures, and debug
+redaction.
 
-Production work still includes a concrete audited provider, real Ed25519 and
-ML-DSA-65 known-answer and negative vectors, full encrypted-handshake vectors,
-AEAD/runtime integration around the implemented transcript state, key erasure,
-stateful fuzzing, and cryptographic CPU benchmarking under invalid
-authenticated traffic.
+The feature-gated concrete tests additionally cover real hybrid handshake and
+manifest signatures, independent Finished/Ed25519/ML-DSA tampering, weak
+Ed25519 keys, malformed ML-DSA signatures, the RFC 8032 empty-message vector,
+entropy-backed key generation, and fixed identity-memory bounds.
+
+Production work still includes an audited ML-DSA provider or audited
+replacement, official FIPS 204 known-answer and differential vectors, full
+encrypted-handshake vectors with real identities, AEAD/runtime integration
+around the implemented transcript state, platform key-erasure tests, stateful
+fuzzing, and cryptographic CPU/stack benchmarking under invalid authenticated
+traffic.

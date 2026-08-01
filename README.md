@@ -35,9 +35,10 @@ The current `0.2` version is an early design and codec milestone:
   binding, two-generation key rotation, and bounded post-cookie quotas;
 - provider-neutral X25519/ML-KEM-768 exchange, complete HKDF-SHA-384 schedule,
   one-shot handshake AEAD, and authenticated application-secret type gates;
-- an opt-in concrete `RustCrypto` handshake provider with operating-system
-  entropy, compiler-resistant secret zeroization, real hybrid exchange, and
-  both negotiated AEAD suites;
+- an opt-in concrete `RustCrypto` handshake and identity provider with
+  operating-system entropy, compiler-resistant secret zeroization, real
+  X25519 + ML-KEM-768 exchange, strict Ed25519 + randomized ML-DSA-65
+  authentication, dual-signed manifests, and both negotiated AEAD suites;
 - canonical handshake, transcript, and HKDF serializers;
 - provider-neutral in-place packet-protection orchestration with enforced AEAD
   usage limits;
@@ -70,6 +71,8 @@ This code is not production-ready and must not yet protect sensitive data.
   schedule, Finished values, and RESPONSE/FINISH AEAD;
 - [`RUSTCRYPTO_PROVIDER.md`](docs/RUSTCRYPTO_PROVIDER.md) — concrete provider
   dependencies, entropy, memory behavior, tests, and audit limitations;
+- [`RUSTCRYPTO_AUTHENTICATION.md`](docs/RUSTCRYPTO_AUTHENTICATION.md) — concrete
+  identity keys, signing, verification, fixed memory, and release blockers;
 - [`THREAT_MODEL.md`](docs/THREAT_MODEL.md) — guarantees, adversaries, and limits;
 - [`BENCHMARKS.md`](docs/BENCHMARKS.md) — RAM/CPU budgets and measurement plan;
 - [`CONGESTION.md`](docs/CONGESTION.md) — CUBIC, PTO, and pacing profile;
@@ -91,6 +94,7 @@ opt-in:
 
 ```sh
 cargo test --features rustcrypto-provider --test rustcrypto_handshake_provider
+cargo test --features rustcrypto-provider --test rustcrypto_authentication_provider
 ```
 
 All feature combinations and public cryptographic vectors are checked with:
@@ -101,6 +105,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 ```
 
 The next milestones are independent review or replacement of the concrete
-post-quantum provider, complete encrypted-handshake vectors, physical
-shared-bottleneck validation, and a batched UDP runtime with ECN ancillary data
-plus measured allocation/copy budgets.
+post-quantum provider, official ML-DSA/ML-KEM differential vectors, complete
+encrypted-handshake vectors with real identities, physical shared-bottleneck
+validation, and a batched UDP runtime with ECN ancillary data plus measured
+allocation/copy budgets.

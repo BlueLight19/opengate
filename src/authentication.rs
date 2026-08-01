@@ -13,7 +13,8 @@ use crate::transcript::{AuthenticationRole, TranscriptSink, feed_signature_input
 /// Domain separator for an OGTP identity fingerprint.
 pub const IDENTITY_FINGERPRINT_CONTEXT: &[u8] = b"OGTP/1 identity\x00";
 
-const MAX_CONTEXTUALIZED_SIGNATURE_INPUT_LEN: usize = 192;
+/// Maximum encoded size of one OGTP contextualized signature message.
+pub const MAX_CONTEXTUALIZED_SIGNATURE_INPUT_LEN: usize = 192;
 
 /// Result of a provider verification operation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -371,28 +372,42 @@ fn fingerprints_equal(
         == 0
 }
 
-fn handshake_signature_input(
+/// Builds the exact bounded message signed for handshake peer authentication.
+///
+/// Returning `None` is a fail-closed guard against a future context expansion
+/// exceeding [`MAX_CONTEXTUALIZED_SIGNATURE_INPUT_LEN`].
+#[must_use]
+pub fn handshake_signature_input(
     role: AuthenticationRole,
     transcript_hash: &[u8; SHA384_OUTPUT_LEN],
-) -> Option<FixedSignatureInput> {
-    let mut input = FixedSignatureInput::new();
+) -> Option<ContextualizedSignatureInput> {
+    let mut input = ContextualizedSignatureInput::new();
     feed_signature_input(&mut input, role, transcript_hash);
     (!input.overflowed).then_some(input)
 }
 
-fn manifest_signature_input(manifest_hash: &Sha384Digest) -> Option<FixedSignatureInput> {
-    let mut input = FixedSignatureInput::new();
+/// Builds the exact bounded message signed for a canonical manifest.
+///
+/// Returning `None` is a fail-closed guard against a future context expansion
+/// exceeding [`MAX_CONTEXTUALIZED_SIGNATURE_INPUT_LEN`].
+#[must_use]
+pub fn manifest_signature_input(
+    manifest_hash: &Sha384Digest,
+) -> Option<ContextualizedSignatureInput> {
+    let mut input = ContextualizedSignatureInput::new();
     feed_manifest_signature_input(&mut input, manifest_hash);
     (!input.overflowed).then_some(input)
 }
 
-struct FixedSignatureInput {
+/// Fixed-capacity canonical message consumed by both identity signature
+/// algorithms.
+pub struct ContextualizedSignatureInput {
     bytes: [u8; MAX_CONTEXTUALIZED_SIGNATURE_INPUT_LEN],
     length: usize,
     overflowed: bool,
 }
 
-impl FixedSignatureInput {
+impl ContextualizedSignatureInput {
     const fn new() -> Self {
         Self {
             bytes: [0; MAX_CONTEXTUALIZED_SIGNATURE_INPUT_LEN],
@@ -401,12 +416,29 @@ impl FixedSignatureInput {
         }
     }
 
-    fn as_slice(&self) -> &[u8] {
+    /// Returns the exact contextualized message bytes.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
         &self.bytes[..self.length]
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        self.as_bytes()
     }
 }
 
-impl TranscriptSink for FixedSignatureInput {
+impl fmt::Debug for ContextualizedSignatureInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ContextualizedSignatureInput")
+            .field("length", &self.length)
+            .field("overflowed", &self.overflowed)
+            .field("bytes", &"<redacted>")
+            .finish()
+    }
+}
+
+impl TranscriptSink for ContextualizedSignatureInput {
     fn update(&mut self, bytes: &[u8]) {
         let Some(end) = self.length.checked_add(bytes.len()) else {
             self.overflowed = true;

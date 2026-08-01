@@ -35,8 +35,10 @@ The implemented provider boundary, consumed initiator state, atomic responder
 result, all-zero check, fixed secret storage, and hybrid ordering are specified
 in [`HANDSHAKE_CRYPTO.md`](HANDSHAKE_CRYPTO.md). ML-KEM providers preserve
 implicit rejection; authentication failure is observed at the handshake AEAD.
-The feature-gated concrete adapter and its explicit audit limitations are
-specified in [`RUSTCRYPTO_PROVIDER.md`](RUSTCRYPTO_PROVIDER.md).
+The feature-gated concrete handshake and identity adapter and its explicit
+audit limitations are specified in
+[`RUSTCRYPTO_PROVIDER.md`](RUSTCRYPTO_PROVIDER.md) and
+[`RUSTCRYPTO_AUTHENTICATION.md`](RUSTCRYPTO_AUTHENTICATION.md).
 
 ## 2. Canonical transcript
 
@@ -318,9 +320,11 @@ AES block-cipher, and ChaCha20 implementations in `tests/packet_vectors.rs`.
 Before production use, this schedule requires:
 
 - independent cryptographic review;
-- complete encrypted-handshake vectors and real Ed25519/ML-DSA negative tests;
+- complete encrypted-handshake vectors carrying real hybrid identity values;
 - independent audit or replacement of the feature-gated concrete provider,
-  plus official X25519/ML-KEM-768 known-answer and malformed-input coverage;
+  plus official X25519/ML-KEM-768 and ML-DSA-65 known-answer and differential
+  coverage; real Ed25519/ML-DSA negative tests already run in the feature-gated
+  suite;
 - authenticated-cookie and batched-runtime integration of the bounded
   handshake state;
 - enforcement of algorithm-specific AEAD usage limits;

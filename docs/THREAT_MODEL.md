@@ -105,12 +105,16 @@ analysis resistance.
   deterministic conflicting-overlap and rollback tests already exist.
 - Stateful fuzzing of bounded Merkle carries and irregular-tree finalization;
   deterministic reference-tree and provider-failure tests already exist.
-- Real-provider negative tests for Finished, Ed25519, and ML-DSA-65 plus
-  verification-order and authenticated-state installation fuzzing.
+- Stateful fuzzing of verification order and authenticated-state installation;
+  the feature-gated real-provider suite already rejects independent Finished,
+  Ed25519, ML-DSA-65, trust-anchor, weak-key, and malformed-signature cases.
 - Complete official X25519/ML-KEM-768 known-answer coverage and independent
   provider review; the concrete feature-gated tests already cover live hybrid
   agreement, malformed public keys, ciphertext implicit rejection, both
   one-shot AEAD suites, published HKDF stages, and tampering.
+- Official ML-DSA-65 known-answer and independent differential coverage; the
+  concrete suite already covers randomized signing, real dual verification,
+  manifest binding, and an RFC 8032 Ed25519 known-answer vector.
 - Continuous fuzzing of codecs and the bounded handshake state; deterministic
   overlap, metadata-change, admission, pool-exhaustion, and transcript rollback
   tests already exist.

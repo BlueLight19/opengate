@@ -13,8 +13,9 @@ configuration, confidence interval, and baseline comparison.
 - Full memory copies per useful byte.
 - Peak userspace and kernel memory per connection.
 - SHA-384 cycles per chunk and Merkle internal-node cycles per object.
-- Finished, Ed25519, and ML-DSA-65 verification latency, including invalid
-  inputs rejected at each fail-closed gate.
+- Finished, Ed25519, and ML-DSA-65 signing and verification latency, including
+  operating-system entropy cost and invalid inputs rejected at each fail-closed
+  gate.
 - p50, p95, and p99 completion time.
 - Energy per GiB on platforms exposing reliable counters.
 - Recovery time after complete path loss.
@@ -158,6 +159,9 @@ Performance alone is insufficient. The harness includes:
 - concrete-provider X25519 key generation/agreement, ML-KEM-768
   key-generation/encapsulation/decapsulation, HKDF schedule, and full
   RESPONSE/FINISH protection, reporting latency distributions and peak stack;
+- concrete-provider hybrid identity generation, handshake/manifest signing,
+  strict Ed25519 verification, randomized ML-DSA-65 verification, resident key
+  size, temporary allocation count, and peak signing/verification stack;
 - key-phase changes at boundary conditions;
 - memory pressure and artificially slow storage.
 

@@ -454,10 +454,11 @@ transcript and authenticated-identity capabilities. See
 [`HANDSHAKE_CRYPTO.md`](HANDSHAKE_CRYPTO.md).
 
 The optional `rustcrypto-provider` feature supplies a concrete software
-implementation of this boundary. It is an interoperability and review target,
-not a release qualification; its ML-KEM dependency currently declares no
-independent audit. See
-[`RUSTCRYPTO_PROVIDER.md`](RUSTCRYPTO_PROVIDER.md).
+implementation of this boundary and the Ed25519 + ML-DSA-65 identity boundary.
+It is an interoperability and review target, not a release qualification; its
+ML-KEM and ML-DSA dependencies currently declare no independent audit. See
+[`RUSTCRYPTO_PROVIDER.md`](RUSTCRYPTO_PROVIDER.md) and
+[`RUSTCRYPTO_AUTHENTICATION.md`](RUSTCRYPTO_AUTHENTICATION.md).
 
 The RETRY cookie binds at least the source address, source port, CID, nonce,
 version, and expiry. Before cookie validation, a responder:
@@ -776,9 +777,9 @@ and reject structurally invalid packet forms.
 - Physical shared-bottleneck fairness validation of the experimental
   CUBIC/LIA controller.
 - Relay negotiation and behavior.
-- Audited concrete authentication provider, bounded storage/Merkle integration,
-  and transfer-control timeout wiring in the batched UDP runtime.
-- Independent audit or replacement of the concrete hybrid-handshake provider,
-  an audited stateless-cookie adapter, plus lease/reassembly ownership,
+- Independent audit or replacement of the concrete hybrid handshake and
+  authentication provider, bounded storage/Merkle integration, and
+  transfer-control timeout wiring in the batched UDP runtime.
+- An audited stateless-cookie adapter, plus lease/reassembly ownership,
   amplification accounting, deadline, and state-lifecycle wiring in that
   runtime.
