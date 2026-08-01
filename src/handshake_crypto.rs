@@ -1,6 +1,7 @@
 //! Provider-neutral hybrid key exchange and handshake AEAD orchestration.
 
 use core::fmt;
+use zeroize::Zeroize;
 
 use crate::authentication::AuthenticatedIdentity;
 use crate::crypto::{Sha384Digest, Sha384Provider};
@@ -184,7 +185,7 @@ impl<const N: usize> SecretBytes<N> {
 
 impl<const N: usize> Drop for SecretBytes<N> {
     fn drop(&mut self) {
-        self.0.fill(0);
+        self.0.zeroize();
     }
 }
 
@@ -393,10 +394,10 @@ impl DirectionalHandshakeSecrets {
 
 impl Drop for DirectionalHandshakeSecrets {
     fn drop(&mut self) {
-        self.traffic_secret.fill(0);
-        self.finished_key.fill(0);
-        self.aead_key.fill(0);
-        self.aead_iv.fill(0);
+        self.traffic_secret.zeroize();
+        self.finished_key.zeroize();
+        self.aead_key.zeroize();
+        self.aead_iv.zeroize();
         self.seal_reserved = true;
     }
 }
@@ -508,7 +509,7 @@ impl HandshakeSecrets {
 
 impl Drop for HandshakeSecrets {
     fn drop(&mut self) {
-        self.master_secret.fill(0);
+        self.master_secret.zeroize();
     }
 }
 
@@ -544,8 +545,8 @@ impl ApplicationSecrets {
 
 impl Drop for ApplicationSecrets {
     fn drop(&mut self) {
-        self.initiator.fill(0);
-        self.responder.fill(0);
+        self.initiator.zeroize();
+        self.responder.zeroize();
     }
 }
 
@@ -578,7 +579,7 @@ impl OpenedIdentityAuth {
 
 impl Drop for OpenedIdentityAuth {
     fn drop(&mut self) {
-        self.storage.fill(0);
+        self.storage.zeroize();
     }
 }
 

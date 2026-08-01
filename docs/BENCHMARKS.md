@@ -155,6 +155,9 @@ Performance alone is insufficient. The harness includes:
 - invalid authentication tags;
 - malformed X25519/ML-KEM inputs, implicit-rejection ciphertexts, handshake
   AEAD AAD/role/message-ID mismatches, and provider failure injection;
+- concrete-provider X25519 key generation/agreement, ML-KEM-768
+  key-generation/encapsulation/decapsulation, HKDF schedule, and full
+  RESPONSE/FINISH protection, reporting latency distributions and peak stack;
 - key-phase changes at boundary conditions;
 - memory pressure and artificially slow storage.
 

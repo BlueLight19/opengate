@@ -453,6 +453,12 @@ for `RESPONSE` and `FINISH`. Application secrets additionally require completed
 transcript and authenticated-identity capabilities. See
 [`HANDSHAKE_CRYPTO.md`](HANDSHAKE_CRYPTO.md).
 
+The optional `rustcrypto-provider` feature supplies a concrete software
+implementation of this boundary. It is an interoperability and review target,
+not a release qualification; its ML-KEM dependency currently declares no
+independent audit. See
+[`RUSTCRYPTO_PROVIDER.md`](RUSTCRYPTO_PROVIDER.md).
+
 The RETRY cookie binds at least the source address, source port, CID, nonce,
 version, and expiry. Before cookie validation, a responder:
 
@@ -772,6 +778,7 @@ and reject structurally invalid packet forms.
 - Relay negotiation and behavior.
 - Audited concrete authentication provider, bounded storage/Merkle integration,
   and transfer-control timeout wiring in the batched UDP runtime.
-- Audited stateless-cookie and hybrid-handshake crypto adapters plus
-  lease/reassembly ownership, amplification accounting, deadline, and
-  state-lifecycle wiring in that runtime.
+- Independent audit or replacement of the concrete hybrid-handshake provider,
+  an audited stateless-cookie adapter, plus lease/reassembly ownership,
+  amplification accounting, deadline, and state-lifecycle wiring in that
+  runtime.

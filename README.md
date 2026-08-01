@@ -35,6 +35,9 @@ The current `0.2` version is an early design and codec milestone:
   binding, two-generation key rotation, and bounded post-cookie quotas;
 - provider-neutral X25519/ML-KEM-768 exchange, complete HKDF-SHA-384 schedule,
   one-shot handshake AEAD, and authenticated application-secret type gates;
+- an opt-in concrete `RustCrypto` handshake provider with operating-system
+  entropy, compiler-resistant secret zeroization, real hybrid exchange, and
+  both negotiated AEAD suites;
 - canonical handshake, transcript, and HKDF serializers;
 - provider-neutral in-place packet-protection orchestration with enforced AEAD
   usage limits;
@@ -65,6 +68,8 @@ This code is not production-ready and must not yet protect sensitive data.
   cookies, rotation, expiration, and fixed post-cookie admission;
 - [`HANDSHAKE_CRYPTO.md`](docs/HANDSHAKE_CRYPTO.md) — hybrid exchange, key
   schedule, Finished values, and RESPONSE/FINISH AEAD;
+- [`RUSTCRYPTO_PROVIDER.md`](docs/RUSTCRYPTO_PROVIDER.md) — concrete provider
+  dependencies, entropy, memory behavior, tests, and audit limitations;
 - [`THREAT_MODEL.md`](docs/THREAT_MODEL.md) — guarantees, adversaries, and limits;
 - [`BENCHMARKS.md`](docs/BENCHMARKS.md) — RAM/CPU budgets and measurement plan;
 - [`CONGESTION.md`](docs/CONGESTION.md) — CUBIC, PTO, and pacing profile;
@@ -80,14 +85,22 @@ This code is not production-ready and must not yet protect sensitive data.
 
 ## Development
 
-The default library has no external dependencies. Development-only RustCrypto
-packages reproduce the public cryptographic vectors:
+The default library depends only on `zeroize` so protocol-owned handshake
+secrets receive compiler-resistant erasure. The concrete software provider is
+opt-in:
+
+```sh
+cargo test --features rustcrypto-provider --test rustcrypto_handshake_provider
+```
+
+All feature combinations and public cryptographic vectors are checked with:
 
 ```sh
 cargo test --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-The next milestones are physical shared-bottleneck validation, an audited
-cryptographic provider adapter, and a batched UDP runtime with ECN ancillary
-data plus measured allocation/copy budgets.
+The next milestones are independent review or replacement of the concrete
+post-quantum provider, complete encrypted-handshake vectors, physical
+shared-bottleneck validation, and a batched UDP runtime with ECN ancillary data
+plus measured allocation/copy budgets.

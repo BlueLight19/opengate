@@ -170,11 +170,12 @@ negotiation failures, and provider failures during both updates and snapshots.
 
 Production work still includes:
 
-- audited concrete hybrid KEM and handshake-AEAD provider adapters;
+- independent audit or replacement of the feature-gated concrete hybrid KEM
+  and handshake-AEAD provider;
 - event-loop sequencing around the implemented crypto and authentication
   capabilities;
 - lease/reassembly ownership and deadline wiring in the UDP runtime;
 - stateful fuzzing of fragmentation, rollback, and slot lifecycle;
 - encrypted-handshake interoperability vectors;
-- audited secret erasure and cryptographic provider adapters;
+- platform-verified secret erasure, crash-dump policy, and secure-key storage;
 - CPU and memory benchmarks under distributed valid-cookie traffic.

@@ -22,6 +22,8 @@ pub mod multipath;
 pub mod protection;
 pub mod recovery;
 pub mod retry;
+#[cfg(feature = "rustcrypto-provider")]
+pub mod rustcrypto_provider;
 #[cfg(any(test, feature = "simulator"))]
 pub mod simulator;
 pub mod transcript;

@@ -8,11 +8,32 @@ publish = false
 
 [features]
 default = []
+rustcrypto-provider = [
+    "dep:aes-gcm",
+    "dep:chacha20poly1305",
+    "dep:getrandom",
+    "dep:hkdf",
+    "dep:hmac",
+    "dep:ml-kem",
+    "dep:sha2",
+    "dep:x25519-dalek",
+]
 simulator = []
 
 [lib]
 name = "ogtp"
 path = "src/lib.rs"
+
+[dependencies]
+aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "zeroize"], optional = true }
+chacha20poly1305 = { version = "0.10.1", default-features = false, optional = true }
+getrandom = { version = "0.4.3", optional = true }
+hkdf = { version = "0.12.4", default-features = false, optional = true }
+hmac = { version = "0.12.1", default-features = false, optional = true }
+ml-kem = { version = "0.3.2", default-features = false, features = ["hazmat", "zeroize"], optional = true }
+sha2 = { version = "0.10.9", default-features = false, optional = true }
+x25519-dalek = { version = "3.0.0", default-features = false, features = ["precomputed-tables", "static_secrets", "zeroize"], optional = true }
+zeroize = { version = "1.9.0", default-features = false }
 
 [dev-dependencies]
 aes = "0.8.4"

@@ -25,14 +25,18 @@ hybrid_shared_secret = ml_kem_shared_secret[32]
                     || x25519_shared_secret[32]
 ```
 
-Both components MUST be exactly 32 bytes. X25519 all-zero output, ML-KEM
-decapsulation failure, or an incorrect public-key/ciphertext length aborts the
-handshake without using a partial secret.
+Both components MUST be exactly 32 bytes. X25519 all-zero output, a provider
+backend failure, or an incorrect public-key/ciphertext length aborts the
+handshake without using a partial secret. An exact-length malformed ML-KEM
+ciphertext follows FIPS 203 implicit rejection and is detected only when the
+derived handshake AEAD fails authentication.
 
 The implemented provider boundary, consumed initiator state, atomic responder
 result, all-zero check, fixed secret storage, and hybrid ordering are specified
 in [`HANDSHAKE_CRYPTO.md`](HANDSHAKE_CRYPTO.md). ML-KEM providers preserve
 implicit rejection; authentication failure is observed at the handshake AEAD.
+The feature-gated concrete adapter and its explicit audit limitations are
+specified in [`RUSTCRYPTO_PROVIDER.md`](RUSTCRYPTO_PROVIDER.md).
 
 ## 2. Canonical transcript
 
@@ -315,8 +319,8 @@ Before production use, this schedule requires:
 
 - independent cryptographic review;
 - complete encrypted-handshake vectors and real Ed25519/ML-DSA negative tests;
-- audited real-provider X25519/ML-KEM-768 known-answer and malformed-input
-  tests;
+- independent audit or replacement of the feature-gated concrete provider,
+  plus official X25519/ML-KEM-768 known-answer and malformed-input coverage;
 - authenticated-cookie and batched-runtime integration of the bounded
   handshake state;
 - enforcement of algorithm-specific AEAD usage limits;

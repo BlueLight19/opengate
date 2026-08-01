@@ -28,9 +28,11 @@ must follow FIPS 203 implicit rejection: an attacker-controlled ciphertext does
 not become a distinguishable decapsulation-validity error. Authentication of
 the derived secret occurs when the fixed handshake AEAD is opened.
 
-The default library contains no KEM, curve, HKDF, HMAC, or handshake-AEAD
-implementation. Test providers reproduce the published HKDF vector and the
-orchestration failure paths; they are not production providers.
+The default build contains no KEM, curve, HKDF, HMAC, or handshake-AEAD
+implementation. The `rustcrypto-provider` feature adds the concrete software
+adapter specified in
+[`RUSTCRYPTO_PROVIDER.md`](RUSTCRYPTO_PROVIDER.md). Deterministic unit-test
+providers remain separate and are not security implementations.
 
 ## Initiator state
 
@@ -89,9 +91,10 @@ implemented schedule is tested byte-for-byte against
 two application secrets.
 
 Temporary shared secrets, extraction stages, traffic keys, and IVs use fixed
-`SecretBytes` storage with redacted diagnostics and logical overwrite on drop.
-No KEM or KDF path allocates based on network input. Compiler-proof physical
-zeroization still belongs to the audited provider and platform integration.
+`SecretBytes` storage with redacted diagnostics and `zeroize`-backed overwrite
+on drop. No KEM or KDF path allocates based on network input. Copies inside a
+cryptographic backend, registers, kernel buffers, crash dumps, swap, and
+platform key storage remain part of the provider and deployment audit.
 
 ## Finished values
 
@@ -210,11 +213,17 @@ role-separated AEAD, message-ID nonces, AAD/role/ciphertext tampering, one-way
 seal reservation, provider failure and length faults, candidate plaintext
 containment, application derivation, and diagnostic redaction.
 
+Feature-gated integration tests additionally execute real X25519 and
+ML-KEM-768 exchanges, reproduce published HKDF stages, compare Finished values,
+exercise AES-256-GCM and ChaCha20-Poly1305 in both handshake directions, reject
+tampering and non-canonical ML-KEM public keys, and verify that malformed
+ML-KEM ciphertexts retain implicit-rejection behavior.
+
 Production work still includes:
 
-- audited X25519 and ML-KEM-768 provider adapters with real known-answer and
-  malformed-input tests;
-- audited AES-256-GCM/ChaCha20-Poly1305, HKDF, HMAC, and secure-key storage;
+- independent audit or replacement of the concrete X25519/ML-KEM-768 adapter;
+- complete official known-answer coverage for the selected ML-KEM backend;
+- audited secure-key storage and platform crash/swap/core-dump policy;
 - complete encrypted `RESPONSE` and `FINISH` interoperability vectors;
 - stateful fuzzing across KEM failure, transcript rollback, AEAD failure, and
   capability installation;
