@@ -21,6 +21,8 @@ The current `0.2` version is an early design and codec milestone:
   ceilings without charging retransmissions twice;
 - canonical, allocation-free CREDIT, COMMIT, and windowed RESUME values with
   public bit-exact CONTROL vectors;
+- bounded canonical object manifests with domain-separated SHA-384 Merkle
+  inputs, dual-signature envelopes, and allocation-free fragment codecs;
 - canonical handshake, transcript, and HKDF serializers;
 - provider-neutral in-place packet-protection orchestration with enforced AEAD
   usage limits;
@@ -47,6 +49,7 @@ This code is not production-ready and must not yet protect sensitive data.
 - [`BENCHMARKS.md`](docs/BENCHMARKS.md) — RAM/CPU budgets and measurement plan;
 - [`CONGESTION.md`](docs/CONGESTION.md) — CUBIC, PTO, and pacing profile;
 - [`ECN.md`](docs/ECN.md) — ECN wire feedback and per-path validation;
+- [`MANIFEST.md`](docs/MANIFEST.md) — signed object geometry and Merkle format;
 - [`MULTIPATH.md`](docs/MULTIPATH.md) — experimental coupled path control;
 - [`RECOVERY.md`](docs/RECOVERY.md) — bounded loss-recovery invariants;
 - [`SIMULATION.md`](docs/SIMULATION.md) — deterministic fault-model semantics.

@@ -364,7 +364,7 @@ impl fmt::Display for WireError {
                 formatter,
                 "handshake message too large: {length}, maximum {maximum}"
             ),
-            Self::InvalidFragmentBounds => formatter.write_str("invalid handshake fragment bounds"),
+            Self::InvalidFragmentBounds => formatter.write_str("invalid fragment bounds"),
         }
     }
 }

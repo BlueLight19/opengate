@@ -261,7 +261,7 @@ The initial registry is:
 |---:|---|---|
 | `0x01` | PING | Requests acknowledgement |
 | `0x02` | CREDIT | Advertises available receive capacity |
-| `0x03` | MANIFEST | Describes and signs an object |
+| `0x03` | MANIFEST | Carries a fragment of a signed object manifest |
 | `0x04` | COMMIT | Confirms written and verified chunks |
 | `0x05` | RESUME | Reports chunks already present |
 | `0x06` | PATH_OFFER | Reserves a CID for a new path |
@@ -338,19 +338,55 @@ duplicate COMMIT values are ignored. In `Flags`, bit 0 is `OBJECT_COMPLETE` and
 bits 7 through 1 are zero. `OBJECT_COMPLETE` MUST be set only after every
 manifest chunk and the final Merkle root have been verified.
 
-`Range Count` is between 1 and 32 inclusive. COMMIT ranges use absolute chunk
-indices. Every `Chunk Count` is non-zero and `Chunk Start + Chunk Count` MUST
-NOT exceed `2^32`. Ranges are strictly increasing, non-overlapping, and
-non-adjacent; adjacent runs MUST be merged to produce one canonical encoding.
-The sender validates every range against the manifest and releases byte and
-fragment credit from its local per-chunk accounting. A duplicate committed
-chunk never releases credit twice, and no wire-supplied byte count is trusted.
+`Range Count` is between 1 and 32 inclusive, except that an
+`OBJECT_COMPLETE` COMMIT MAY carry zero new ranges. COMMIT ranges use absolute
+chunk indices. Every `Chunk Count` is non-zero and
+`Chunk Start + Chunk Count` MUST NOT exceed `2^32`. Ranges are strictly
+increasing, non-overlapping, and non-adjacent; adjacent runs MUST be merged to
+produce one canonical encoding. The sender validates every range against the
+manifest and releases byte and fragment credit from its local per-chunk
+accounting. A duplicate committed chunk never releases credit twice, and no
+wire-supplied byte count is trusted.
 
 ## 12. Manifest and resume
 
-A manifest contains a random object identity, object size, chunk size, chunk
-count, SHA-384 Merkle root, minimal metadata, and dual Ed25519 + ML-DSA-65
-signatures.
+A logical manifest has this exact encoding:
+
+```text
+Format Version u8=1 | Flags u8=0 | Object ID[32] | Object Size u64
+Chunk Size u32 | Chunk Count u32 | SHA-384 Merkle Root[48]
+Signer Identity Fingerprint[48] | Display Name Length u8
+Display Name[0..255] | Ed25519 Signature[64] | ML-DSA-65 Signature[3309]
+```
+
+The complete value is 3,520 through 3,775 bytes. `Object ID` is random,
+non-zero, and never a content hash. `Chunk Size` is a power of two from 64 KiB
+through 16 MiB. `Chunk Count` is zero for an empty object and otherwise equals
+`floor((Object Size - 1) / Chunk Size) + 1`. The display name is valid UTF-8
+without control characters, `/`, or `\`; it is informational and MUST NOT be
+interpreted as a filesystem path.
+
+The signatures cover the contextualized SHA-384 hash of every field through
+the display name. Both signatures and the signer fingerprint MUST verify. The
+Merkle leaf binds the object ID, chunk index, exact chunk length, and bytes.
+Internal nodes bind their level and ordered child hashes with a distinct domain
+separator. Odd nodes are duplicated; a one-leaf root is the leaf itself. The
+empty root has a separate domain. Exact inputs are specified in
+[`MANIFEST.md`](MANIFEST.md).
+
+Because a logical manifest exceeds the baseline datagram, each MANIFEST TLV is
+a fragment:
+
+```text
+Object Slot u32 | Manifest Length u16 | Fragment Offset u16 | Fragment[N]
+```
+
+Fragments are non-empty and remain inside the declared logical length. For
+each admitted manifest, the receiver takes one fixed 3,775-byte slot and a
+receipt bitmap from a bounded pool. Identical overlaps are ignored;
+conflicting overlaps abort the object. The object is not installed until
+complete reassembly, exact logical decoding, signer identity matching, and
+both signature verifications succeed.
 
 Wire-visible identifiers are never global content hashes. A resume exchange
 sends a range-compressed bitmap of verified chunks inside encrypted CONTROL
@@ -700,7 +736,6 @@ and reject structurally invalid packet forms.
 ## 17. Release blockers
 
 - Independent cryptographic audit and cross-implementation validation.
-- Canonical manifest and dual-signature encoding.
 - Persistent-congestion and ECN ancillary-data integration with the production
   event loop.
 - Physical shared-bottleneck fairness validation of the experimental

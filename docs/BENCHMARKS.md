@@ -139,6 +139,7 @@ Performance alone is insufficient. The harness includes:
   chunk ranges;
 - millions of unknown DCIDs;
 - incomplete handshake fragments;
+- incomplete, duplicated, overlapping, and conflicting manifest fragments;
 - invalid authentication tags;
 - key-phase changes at boundary conditions;
 - memory pressure and artificially slow storage.

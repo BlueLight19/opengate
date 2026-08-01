@@ -100,6 +100,21 @@ identity_fingerprint =
 against the fingerprint carried earlier and against the out-of-band trust
 anchor. Failure of either comparison or signature aborts the handshake.
 
+### Object manifest signatures
+
+Object manifests reuse the authenticated identity keys but have an independent
+context. Let `ManifestHash` be SHA-384 over the canonical unsigned content
+specified in [`MANIFEST.md`](MANIFEST.md). Both algorithms sign:
+
+```text
+64 * 0x20 || "OGTP/1 object manifest" || 0x00 || ManifestHash
+```
+
+The signer fingerprint inside the hashed content must match the current
+authenticated peer and the trust anchor. Ed25519 uses its ordinary signing
+mode, not Ed25519ph. ML-DSA-65 signs the same contextualized bytes. Failure of
+either signature rejects the manifest and every associated resume claim.
+
 ## 4. OGTP-Expand-Label
 
 OGTP reuses the TLS 1.3 structured-label pattern with an independent prefix:

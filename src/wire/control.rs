@@ -141,7 +141,7 @@ impl CommitHeader {
     /// Returns an error for an empty, oversized, overlapping, adjacent, or
     /// out-of-domain range sequence, or when `output` is too small.
     pub fn encode(self, ranges: &[ChunkRange], output: &mut [u8]) -> Result<usize, WireError> {
-        validate_range_count(ranges.len(), false)?;
+        validate_range_count(ranges.len(), self.object_complete)?;
         validate_ranges(ranges.iter().copied(), CHUNK_INDEX_SPACE)?;
         let needed = control_value_len(COMMIT_FIXED_LEN, ranges.len())?;
         ensure_output(needed, output.len())?;
@@ -184,7 +184,7 @@ impl<'a> Commit<'a> {
             });
         }
         let range_count = usize::from(input[13]);
-        validate_range_count(range_count, false)?;
+        validate_range_count(range_count, flags & COMMIT_OBJECT_COMPLETE_FLAG != 0)?;
         let needed = control_value_len(COMMIT_FIXED_LEN, range_count)?;
         ensure_exact_input(input, needed)?;
         let encoded_ranges = &input[COMMIT_FIXED_LEN..needed];
@@ -645,8 +645,12 @@ mod tests {
     #[test]
     fn commit_rejects_non_canonical_ranges() {
         let mut output = [0_u8; 512];
+        let incomplete = CommitHeader {
+            object_complete: false,
+            ..commit_header()
+        };
         assert_eq!(
-            commit_header().encode(&[], &mut output),
+            incomplete.encode(&[], &mut output),
             Err(WireError::InvalidChunkRanges)
         );
         for ranges in [
@@ -683,6 +687,18 @@ mod tests {
                 maximum: MAX_CHUNK_RANGES,
             })
         );
+    }
+
+    #[test]
+    fn complete_commit_may_carry_no_new_ranges() {
+        let mut output = [0_u8; COMMIT_FIXED_LEN];
+        assert_eq!(
+            commit_header().encode(&[], &mut output),
+            Ok(COMMIT_FIXED_LEN)
+        );
+        let decoded = Commit::decode(&output).expect("complete empty COMMIT decodes");
+        assert!(decoded.header.object_complete);
+        assert_eq!(decoded.range_count(), 0);
     }
 
     #[test]

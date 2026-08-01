@@ -78,7 +78,8 @@ analysis resistance.
 | Path injection | Authenticated PATH_OFFER followed by challenge/response | Denial of service on the physical path |
 | Traffic shifting | Per-path validation plus coupled congestion-avoidance growth | An on-path attacker can still degrade one path and redirect encrypted traffic |
 | Downgrade | Version and suites signed into the transcript | Negotiation flaws still require audit |
-| Chunk substitution | AEAD plus authenticated object/offset plus Merkle tree | Hash collision considered infeasible |
+| Chunk substitution | AEAD plus signed, domain-separated object/chunk/length Merkle inputs | Hash collision considered infeasible |
+| Filename traversal | Signed name is informational UTF-8 and never a receiver path | Unsafe application policy can still choose a bad local path |
 | Malicious relay | End-to-end encryption and replay protection | Timing metadata remains visible |
 
 ## Implementation rules
@@ -98,6 +99,7 @@ analysis resistance.
 ## Validation required before production
 
 - Published test vectors for every derivation and packet type.
+- Fixed-capacity manifest reassembly with conflicting-overlap tests.
 - Continuous fuzzing of codecs, the state machine, and handshake fragmentation.
 - Differential tests between two independent implementations.
 - A formal handshake and key-update model, for example in Tamarin or ProVerif.
