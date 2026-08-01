@@ -19,4 +19,5 @@ pub mod recovery;
 #[cfg(any(test, feature = "simulator"))]
 pub mod simulator;
 pub mod transcript;
+pub mod transfer;
 pub mod wire;

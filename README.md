@@ -23,6 +23,8 @@ The current `0.2` version is an early design and codec milestone:
   public bit-exact CONTROL vectors;
 - bounded canonical object manifests with domain-separated SHA-384 Merkle
   inputs, dual-signature envelopes, and allocation-free fragment codecs;
+- fixed-pool manifest reassembly plus transactional, idempotent COMMIT and
+  atomic windowed RESUME state with caller-selected range capacities;
 - canonical handshake, transcript, and HKDF serializers;
 - provider-neutral in-place packet-protection orchestration with enforced AEAD
   usage limits;
@@ -50,6 +52,8 @@ This code is not production-ready and must not yet protect sensitive data.
 - [`CONGESTION.md`](docs/CONGESTION.md) — CUBIC, PTO, and pacing profile;
 - [`ECN.md`](docs/ECN.md) — ECN wire feedback and per-path validation;
 - [`MANIFEST.md`](docs/MANIFEST.md) — signed object geometry and Merkle format;
+- [`TRANSFER_STATE.md`](docs/TRANSFER_STATE.md) — bounded MANIFEST, COMMIT, and
+  RESUME runtime invariants;
 - [`MULTIPATH.md`](docs/MULTIPATH.md) — experimental coupled path control;
 - [`RECOVERY.md`](docs/RECOVERY.md) — bounded loss-recovery invariants;
 - [`SIMULATION.md`](docs/SIMULATION.md) — deterministic fault-model semantics.

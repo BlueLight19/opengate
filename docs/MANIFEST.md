@@ -155,12 +155,18 @@ non-empty object, duplicate COMMIT ranges remain idempotent and never release
 sender credit twice. A RESUME snapshot is accepted only after this manifest
 and both signatures have been authenticated under the same trusted identity.
 
+The implemented fixed-pool reassembler and transactional COMMIT/RESUME state
+are specified in [`TRANSFER_STATE.md`](TRANSFER_STATE.md). Canonical manifest
+decoding is intentionally separate from identity matching and signature
+verification; a runtime must complete both checks before installing the slot.
+
 ## Remaining production work
 
 The codec and hashing inputs are provider-neutral. Production still requires:
 
 - an audited Ed25519 and ML-DSA-65 provider adapter;
-- fixed-buffer fragment reassembly and overlap tracking in the event loop;
+- event-loop admission, timeout, and signature-verification wiring around the
+  implemented fixed-buffer reassembler;
 - bounded on-disk or streaming Merkle reduction;
 - fuzzing, independent vectors, and cross-implementation verification;
 - explicit policy for local filenames, overwrite behavior, and filesystem

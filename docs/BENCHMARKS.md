@@ -140,6 +140,8 @@ Performance alone is insufficient. The harness includes:
 - millions of unknown DCIDs;
 - incomplete handshake fragments;
 - incomplete, duplicated, overlapping, and conflicting manifest fragments;
+- manifest-pool and normalized-range capacity exhaustion;
+- replayed, interrupted, and discontinuous RESUME snapshot windows;
 - invalid authentication tags;
 - key-phase changes at boundary conditions;
 - memory pressure and artificially slow storage.

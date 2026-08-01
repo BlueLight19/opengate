@@ -415,6 +415,10 @@ stale, duplicate, overlapping, or discontinuous windows are ignored or abort
 that snapshot without changing committed state. The sender then transmits only
 chunks absent from the verified ranges.
 
+The fixed-capacity implementation contract, atomic update rules, exhaustion
+behavior, and required event-loop ordering are defined in
+[`TRANSFER_STATE.md`](TRANSFER_STATE.md).
+
 ## 13. Hybrid handshake
 
 The handshake uses a versioned long header and fragmentable messages limited to
@@ -741,3 +745,5 @@ and reject structurally invalid packet forms.
 - Physical shared-bottleneck fairness validation of the experimental
   CUBIC/LIA controller.
 - Relay negotiation and behavior.
+- Audited manifest-signature verification, bounded storage/Merkle integration,
+  and transfer-control timeout wiring in the batched UDP runtime.

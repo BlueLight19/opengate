@@ -99,7 +99,8 @@ analysis resistance.
 ## Validation required before production
 
 - Published test vectors for every derivation and packet type.
-- Fixed-capacity manifest reassembly with conflicting-overlap tests.
+- Continuous fuzzing of the fixed-capacity manifest and transfer-state code;
+  deterministic conflicting-overlap and rollback tests already exist.
 - Continuous fuzzing of codecs, the state machine, and handshake fragmentation.
 - Differential tests between two independent implementations.
 - A formal handshake and key-update model, for example in Tamarin or ProVerif.
