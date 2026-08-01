@@ -615,6 +615,17 @@ impl InitiatorTranscriptMilestone {
     pub const fn full(&self) -> &Sha384Digest {
         &self.full
     }
+
+    #[cfg(test)]
+    pub(crate) const fn for_test(full: Sha384Digest) -> Self {
+        Self {
+            authentication: AuthenticationTranscriptHashes {
+                signature: [0; SHA384_OUTPUT_LEN],
+                finished: [0; SHA384_OUTPUT_LEN],
+            },
+            full,
+        }
+    }
 }
 
 impl fmt::Debug for InitiatorTranscriptMilestone {

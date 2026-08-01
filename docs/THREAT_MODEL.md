@@ -68,6 +68,7 @@ analysis resistance.
 |---|---|---|
 | Man-in-the-middle | Dual transcript signatures and pre-authenticated keys | Human pairing error |
 | Future quantum decryption | Ephemeral X25519 + ML-KEM-768 | Implementation flaw or break of both families |
+| Partial hybrid failure | Atomic two-branch derivation, ML-KEM implicit rejection, independent all-zero X25519 rejection | Provider/composition flaw |
 | Nonce reuse | Separate key per DCID, monotonic packet number, close before limit | State bug or snapshot restore |
 | Replay | Per-path packet-number window, sequenced CONTROL values, and idempotent COMMIT accounting | CPU spent before rejection |
 | ECN suppression or rewriting | Authenticated cumulative counters, sender-mark validation, per-path fallback to Not-ECT | An on-path attacker can still add CE or drop/delay traffic |
@@ -105,6 +106,10 @@ analysis resistance.
   deterministic reference-tree and provider-failure tests already exist.
 - Real-provider negative tests for Finished, Ed25519, and ML-DSA-65 plus
   verification-order and authenticated-state installation fuzzing.
+- Real-provider X25519/ML-KEM-768 known-answer, malformed-key/ciphertext,
+  implicit-rejection, all-zero, one-shot-AEAD, and zeroization tests; the
+  provider-neutral failure paths and published HKDF schedule are deterministic
+  tests already.
 - Continuous fuzzing of codecs and the bounded handshake state; deterministic
   overlap, metadata-change, admission, pool-exhaustion, and transcript rollback
   tests already exist.

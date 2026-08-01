@@ -13,6 +13,7 @@ pub mod crypto;
 pub mod ecn;
 pub mod flow;
 pub mod handshake;
+pub mod handshake_crypto;
 pub mod handshake_state;
 pub mod kdf;
 pub mod manifest;

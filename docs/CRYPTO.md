@@ -29,6 +29,11 @@ Both components MUST be exactly 32 bytes. X25519 all-zero output, ML-KEM
 decapsulation failure, or an incorrect public-key/ciphertext length aborts the
 handshake without using a partial secret.
 
+The implemented provider boundary, consumed initiator state, atomic responder
+result, all-zero check, fixed secret storage, and hybrid ordering are specified
+in [`HANDSHAKE_CRYPTO.md`](HANDSHAKE_CRYPTO.md). ML-KEM providers preserve
+implicit rejection; authentication failure is observed at the handshake AEAD.
+
 ## 2. Canonical transcript
 
 Long-header fragmentation metadata is not hashed directly. Once reassembled,
@@ -203,6 +208,12 @@ RESPONSE uses `TH_pre_auth` as AEAD AAD. FINISH uses `TH_i_signature` as AAD.
 The logical ciphertext is sealed once and then fragmented by the long-header
 layer.
 
+The implemented role-specific seal/open functions reserve encryption exactly
+once before calling the provider, contain opened plaintext in fixed candidate
+storage, and require completed-transcript plus authenticated-identity
+capabilities before application-secret derivation. See
+[`HANDSHAKE_CRYPTO.md`](HANDSHAKE_CRYPTO.md).
+
 ## 6. Per-path traffic keys
 
 Every direction and DCID receives independent material:
@@ -304,6 +315,8 @@ Before production use, this schedule requires:
 
 - independent cryptographic review;
 - complete encrypted-handshake vectors and real Ed25519/ML-DSA negative tests;
+- audited real-provider X25519/ML-KEM-768 known-answer and malformed-input
+  tests;
 - authenticated-cookie and batched-runtime integration of the bounded
   handshake state;
 - enforcement of algorithm-specific AEAD usage limits;

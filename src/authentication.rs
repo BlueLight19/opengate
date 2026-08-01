@@ -97,6 +97,15 @@ impl AuthenticatedIdentity {
     pub const fn ml_dsa_65_public_key(&self) -> &[u8; ML_DSA_65_PUBLIC_KEY_LEN] {
         &self.ml_dsa_65_public_key
     }
+
+    #[cfg(test)]
+    pub(crate) const fn for_test() -> Self {
+        Self {
+            fingerprint: [0; IDENTITY_FINGERPRINT_LEN],
+            ed25519_public_key: [0; ED25519_PUBLIC_KEY_LEN],
+            ml_dsa_65_public_key: [0; ML_DSA_65_PUBLIC_KEY_LEN],
+        }
+    }
 }
 
 impl fmt::Debug for AuthenticatedIdentity {

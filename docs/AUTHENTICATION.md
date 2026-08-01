@@ -40,7 +40,9 @@ handshake state machine must have:
 
 1. validated the RETRY cookie and amplification limit where applicable;
 2. reassembled the logical handshake message in a fixed buffer;
-3. authenticated and decrypted its AEAD ciphertext;
+3. authenticated and decrypted its AEAD ciphertext through the role-specific
+   fixed-candidate contract in
+   [`HANDSHAKE_CRYPTO.md`](HANDSHAKE_CRYPTO.md);
 4. obtained the exact named transcript snapshots from the transactional state
    in [`HANDSHAKE_STATE.md`](HANDSHAKE_STATE.md);
 5. derived the direction- and role-correct Finished key;
@@ -114,6 +116,10 @@ manifests is explicitly redacted. The borrowed `RETRY`, `INIT`, `RESPONSE`,
 implementations. Provider errors are still provider-owned; adapters must ensure
 their error values never include keys, MACs, plaintext, complete transcript
 hashes, or global object hashes.
+
+Application traffic secrets cannot be derived through the public API from
+AEAD success alone. The crypto schedule additionally requires the resulting
+`AuthenticatedIdentity` and the completed transcript milestone.
 
 ## Tests and remaining production work
 

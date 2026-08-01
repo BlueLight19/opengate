@@ -446,6 +446,13 @@ into an HKDF-SHA-384 key schedule bound to the SHA-384 transcript hash.
 `auth_r` and `auth_i` contain Ed25519 and ML-DSA-65 signatures over the
 transcript and negotiated parameters.
 
+The implemented provider-neutral exchange consumes initiator ephemeral state,
+rejects all-zero X25519 output, preserves ML-KEM implicit rejection, reproduces
+the complete published HKDF schedule, and provides role-specific one-shot AEAD
+for `RESPONSE` and `FINISH`. Application secrets additionally require completed
+transcript and authenticated-identity capabilities. See
+[`HANDSHAKE_CRYPTO.md`](HANDSHAKE_CRYPTO.md).
+
 The RETRY cookie binds at least the source address, source port, CID, nonce,
 version, and expiry. Before cookie validation, a responder:
 
@@ -765,6 +772,6 @@ and reject structurally invalid packet forms.
 - Relay negotiation and behavior.
 - Audited concrete authentication provider, bounded storage/Merkle integration,
   and transfer-control timeout wiring in the batched UDP runtime.
-- Audited stateless-cookie AEAD adapter plus lease/reassembly ownership,
-  amplification accounting, deadline, handshake AEAD, and state-lifecycle
-  wiring in that runtime.
+- Audited stateless-cookie and hybrid-handshake crypto adapters plus
+  lease/reassembly ownership, amplification accounting, deadline, and
+  state-lifecycle wiring in that runtime.

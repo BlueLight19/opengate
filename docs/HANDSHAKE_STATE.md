@@ -7,8 +7,9 @@ This document specifies the bounded receive and transcript state implemented in
 fragment reassembly, canonical transcript transitions, and failure semantics.
 Cookie authentication and the fixed post-cookie quota table are implemented by
 [`RETRY_ADMISSION.md`](RETRY_ADMISSION.md). This layer does not perform hybrid
-key exchange, handshake AEAD opening, peer authentication, retransmission, or
-timeout scheduling.
+key exchange or handshake AEAD itself; those operations are defined by
+[`HANDSHAKE_CRYPTO.md`](HANDSHAKE_CRYPTO.md). It also does not perform peer
+authentication, retransmission, or timeout scheduling.
 
 ## Resource model
 
@@ -169,7 +170,9 @@ negotiation failures, and provider failures during both updates and snapshots.
 
 Production work still includes:
 
-- concrete hybrid KEM, AEAD, and authentication integration;
+- audited concrete hybrid KEM and handshake-AEAD provider adapters;
+- event-loop sequencing around the implemented crypto and authentication
+  capabilities;
 - lease/reassembly ownership and deadline wiring in the UDP runtime;
 - stateful fuzzing of fragmentation, rollback, and slot lifecycle;
 - encrypted-handshake interoperability vectors;

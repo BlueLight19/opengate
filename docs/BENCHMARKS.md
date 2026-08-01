@@ -153,6 +153,8 @@ Performance alone is insufficient. The harness includes:
 - Merkle trees around every power-of-two boundary, provider failures during the
   deepest representable carry, and root mismatch rollback;
 - invalid authentication tags;
+- malformed X25519/ML-KEM inputs, implicit-rejection ciphertexts, handshake
+  AEAD AAD/role/message-ID mismatches, and provider failure injection;
 - key-phase changes at boundary conditions;
 - memory pressure and artificially slow storage.
 

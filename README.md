@@ -33,6 +33,8 @@ The current `0.2` version is an early design and codec milestone:
   fixed-pool handshake reassembly, and transactional transcript snapshots;
 - fixed 226-byte authenticated `RETRY` cookies with complete endpoint/context
   binding, two-generation key rotation, and bounded post-cookie quotas;
+- provider-neutral X25519/ML-KEM-768 exchange, complete HKDF-SHA-384 schedule,
+  one-shot handshake AEAD, and authenticated application-secret type gates;
 - canonical handshake, transcript, and HKDF serializers;
 - provider-neutral in-place packet-protection orchestration with enforced AEAD
   usage limits;
@@ -61,6 +63,8 @@ This code is not production-ready and must not yet protect sensitive data.
   fixed-memory reassembly, and transactional transcript state;
 - [`RETRY_ADMISSION.md`](docs/RETRY_ADMISSION.md) — authenticated stateless
   cookies, rotation, expiration, and fixed post-cookie admission;
+- [`HANDSHAKE_CRYPTO.md`](docs/HANDSHAKE_CRYPTO.md) — hybrid exchange, key
+  schedule, Finished values, and RESPONSE/FINISH AEAD;
 - [`THREAT_MODEL.md`](docs/THREAT_MODEL.md) — guarantees, adversaries, and limits;
 - [`BENCHMARKS.md`](docs/BENCHMARKS.md) — RAM/CPU budgets and measurement plan;
 - [`CONGESTION.md`](docs/CONGESTION.md) — CUBIC, PTO, and pacing profile;
