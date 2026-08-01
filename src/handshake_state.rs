@@ -9,6 +9,7 @@ use crate::handshake::{
     KNOWN_CAPABILITY_BITS, MAX_RETRY_COOKIE_LEN, MIN_RETRY_COOKIE_LEN, RANDOM_LEN,
     RESPONSE_FIXED_LEN, RESPONSE_LEN, Response, Retry,
 };
+use crate::retry::HandshakeAdmissionLease;
 use crate::transcript::{SessionContext, TranscriptError, TranscriptRecordType, feed_record};
 use crate::wire::WireError;
 use crate::wire::long::{
@@ -24,7 +25,7 @@ const IDENTITY_AUTH_CONTENT_LEN: usize = IDENTITY_AUTH_LEN - FINISHED_MAC_LEN;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ReassemblyAdmission {
     /// The responder has validated the stateless RETRY cookie from the INIT prefix.
-    CookieValidated,
+    CookieValidated(HandshakeAdmissionLease),
     /// The connection already owns state that expects RESPONSE or FINISH.
     ExistingHandshake,
 }
@@ -51,8 +52,9 @@ impl fmt::Debug for InitAdmissionView<'_> {
 
 /// Extracts the bounded cookie-bearing INIT prefix from fragment zero.
 ///
-/// The caller validates `cookie` using server-local authenticated-cookie logic
-/// before passing [`ReassemblyAdmission::CookieValidated`] to the pool.
+/// The caller validates `cookie`, admits the resulting capability through the
+/// fixed quota table, and passes the returned lease through
+/// [`ReassemblyAdmission::CookieValidated`] to the pool.
 ///
 /// # Errors
 ///
@@ -454,7 +456,7 @@ fn validate_reassembly_admission(
     admission: ReassemblyAdmission,
 ) -> Result<(), HandshakeReassemblyError> {
     match (packet_type, admission) {
-        (LongPacketType::Init, ReassemblyAdmission::CookieValidated)
+        (LongPacketType::Init, ReassemblyAdmission::CookieValidated(_))
         | (
             LongPacketType::Response | LongPacketType::Finish,
             ReassemblyAdmission::ExistingHandshake,
@@ -1443,7 +1445,7 @@ mod tests {
                     0,
                     &response[..100],
                 ),
-                ReassemblyAdmission::CookieValidated,
+                ReassemblyAdmission::CookieValidated(HandshakeAdmissionLease::for_test()),
             ),
             Err(HandshakeReassemblyError::AdmissionRequired(
                 LongPacketType::Response

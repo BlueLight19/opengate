@@ -143,6 +143,8 @@ Performance alone is insufficient. The harness includes:
 - millions of unknown DCIDs;
 - incomplete handshake fragments;
 - valid-cookie floods that exhaust fixed handshake slots and deadlines;
+- cookie-key rotation boundaries, expired/unknown generations, IPv4 address
+  churn, and IPv6 interface-identifier churn within one `/64`;
 - duplicate, conflicting-overlap, metadata-changing, and out-of-bounds
   handshake fragments;
 - incomplete, duplicated, overlapping, and conflicting manifest fragments;

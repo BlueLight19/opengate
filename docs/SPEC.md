@@ -543,6 +543,13 @@ source address and port, both random values, the offered version, both
 Connection IDs, an expiry, and a hash of canonical HELLO. Its internal encoding
 is server-local and is never parsed by the initiator.
 
+The implemented server-local profile emits a fixed 226-byte cookie with format
+version, key ID, 96-bit nonce, 193-byte encrypted binding, and 128-bit AEAD tag.
+It uses a per-key nonce prefix plus monotonic counter, strict expiration, two
+opening generations, exact IPv4 or IPv6 address binding, and fixed post-cookie
+global/source quotas. The complete contract is specified in
+[`RETRY_ADMISSION.md`](RETRY_ADMISSION.md).
+
 #### INIT
 
 ```text
@@ -758,5 +765,6 @@ and reject structurally invalid packet forms.
 - Relay negotiation and behavior.
 - Audited concrete authentication provider, bounded storage/Merkle integration,
   and transfer-control timeout wiring in the batched UDP runtime.
-- Authenticated stateless-cookie provider plus handshake admission quotas,
-  deadlines, AEAD opening, and state lifecycle wiring in that runtime.
+- Audited stateless-cookie AEAD adapter plus lease/reassembly ownership,
+  amplification accounting, deadline, handshake AEAD, and state-lifecycle
+  wiring in that runtime.

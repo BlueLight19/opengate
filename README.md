@@ -31,6 +31,8 @@ The current `0.2` version is an early design and codec milestone:
   trust-anchor binding, Finished HMAC, Ed25519, and ML-DSA-65 gates;
 - stateless `HELLO`/`RETRY` parsing, pre-allocation `INIT` cookie admission,
   fixed-pool handshake reassembly, and transactional transcript snapshots;
+- fixed 226-byte authenticated `RETRY` cookies with complete endpoint/context
+  binding, two-generation key rotation, and bounded post-cookie quotas;
 - canonical handshake, transcript, and HKDF serializers;
 - provider-neutral in-place packet-protection orchestration with enforced AEAD
   usage limits;
@@ -57,6 +59,8 @@ This code is not production-ready and must not yet protect sensitive data.
   and manifest verification contract;
 - [`HANDSHAKE_STATE.md`](docs/HANDSHAKE_STATE.md) — stateless admission,
   fixed-memory reassembly, and transactional transcript state;
+- [`RETRY_ADMISSION.md`](docs/RETRY_ADMISSION.md) — authenticated stateless
+  cookies, rotation, expiration, and fixed post-cookie admission;
 - [`THREAT_MODEL.md`](docs/THREAT_MODEL.md) — guarantees, adversaries, and limits;
 - [`BENCHMARKS.md`](docs/BENCHMARKS.md) — RAM/CPU budgets and measurement plan;
 - [`CONGESTION.md`](docs/CONGESTION.md) — CUBIC, PTO, and pacing profile;

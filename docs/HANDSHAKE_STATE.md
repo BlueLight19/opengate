@@ -5,8 +5,10 @@ Status: **draft 0.2 implementation contract; runtime integration required**.
 This document specifies the bounded receive and transcript state implemented in
 `src/handshake_state.rs`. It covers stateless admission, fixed-capacity
 fragment reassembly, canonical transcript transitions, and failure semantics.
-It does not perform cookie authentication, hybrid key exchange, AEAD opening,
-peer authentication, retransmission, or timeout scheduling.
+Cookie authentication and the fixed post-cookie quota table are implemented by
+[`RETRY_ADMISSION.md`](RETRY_ADMISSION.md). This layer does not perform hybrid
+key exchange, handshake AEAD opening, peer authentication, retransmission, or
+timeout scheduling.
 
 ## Resource model
 
@@ -46,11 +48,13 @@ Canonical HELLO[90] | Server Random[32] | Cookie Length u16
 The decoder validates the long-packet bounds, canonical `HELLO`, cookie bounds,
 and the exact declared logical length of `1,340 + Cookie Length`. It returns a
 borrowed cookie view without allocating a slot. The runtime authenticates the
-cookie, checks expiry and address/CID bindings, and applies amplification and
-source quotas. Only then may it pass `CookieValidated` to reassembly.
+cookie, checks expiry and address/CID bindings, and applies fixed global/source
+quotas. The quota table returns an opaque `HandshakeAdmissionLease`; only
+`CookieValidated(lease)` may admit `INIT` to reassembly.
 
-`CookieValidated` is an API admission marker, not cryptographic proof. It must
-never be constructed merely because a cookie field was present or parseable.
+External callers cannot construct the lease fields. The runtime must still
+couple each live lease to exactly one preallocated reassembly owner and stop
+using it after release or deadline expiration.
 
 `RESPONSE` and `FINISH` require `ExistingHandshake`, meaning that the receiving
 connection already owns the corresponding expected state. The pool accepts
@@ -165,9 +169,8 @@ negotiation failures, and provider failures during both updates and snapshots.
 
 Production work still includes:
 
-- an authenticated stateless-cookie provider and rotating cookie-key policy;
 - concrete hybrid KEM, AEAD, and authentication integration;
-- per-source/global admission and deadline wiring in the UDP runtime;
+- lease/reassembly ownership and deadline wiring in the UDP runtime;
 - stateful fuzzing of fragmentation, rollback, and slot lifecycle;
 - encrypted-handshake interoperability vectors;
 - audited secret erasure and cryptographic provider adapters;

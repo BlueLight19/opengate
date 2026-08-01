@@ -71,8 +71,8 @@ analysis resistance.
 | Nonce reuse | Separate key per DCID, monotonic packet number, close before limit | State bug or snapshot restore |
 | Replay | Per-path packet-number window, sequenced CONTROL values, and idempotent COMMIT accounting | CPU spent before rejection |
 | ECN suppression or rewriting | Authenticated cumulative counters, sender-mark validation, per-path fallback to Not-ECT | An on-path attacker can still add CE or drop/delay traffic |
-| UDP amplification | Stateless RETRY and 3x amplification limit | Botnet using valid source addresses |
-| Handshake RAM exhaustion | Stateless HELLO/RETRY, cookie-prefix validation before a fixed 16 KiB + bitmap slot, global and per-source quotas | Distributed valid-cookie sources |
+| UDP amplification | Authenticated stateless RETRY and 3x amplification limit | Botnet using valid source addresses |
+| Handshake RAM exhaustion | Cookie authentication before a generation lease, fixed global/exact-IPv4-or-IPv6-/64 quotas, deadline, then a fixed 16 KiB + bitmap slot | Distributed valid-cookie sources/prefixes |
 | DATA RAM exhaustion | Credits, fixed pools, manifest bounds | Lower throughput under pressure |
 | Cryptographic CPU exhaustion | Cookie before PQ operations, batching, quotas | Authenticated malicious peer |
 | Path injection | Authenticated PATH_OFFER followed by challenge/response | Denial of service on the physical path |
@@ -108,6 +108,9 @@ analysis resistance.
 - Continuous fuzzing of codecs and the bounded handshake state; deterministic
   overlap, metadata-change, admission, pool-exhaustion, and transcript rollback
   tests already exist.
+- Stateful fuzzing of cookie canonicalization, expiry boundaries, key rotation,
+  nonce exhaustion, quota normalization, and admission-lease lifecycle;
+  deterministic failure and rollback tests already exist.
 - Differential tests between two independent implementations.
 - A formal handshake and key-update model, for example in Tamarin or ProVerif.
 - Analysis and enforcement of AEAD usage limits.
