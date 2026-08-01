@@ -27,6 +27,8 @@ The current `0.2` version is an early design and codec milestone:
   loss detection, and deterministic multipath reinjection selection;
 - bounded PTO and persistent-congestion state, byte-counted CUBIC, and a
   nanosecond integer pacer for each path;
+- allocation-free HyStart++ with Conservative Slow Start and packet-number
+  round tracking;
 - an opt-in deterministic multipath fault simulator.
 
 This code is not production-ready and must not yet protect sensitive data.
@@ -51,6 +53,6 @@ cargo test --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-The next milestones are HyStart++, ECN validation, coupled multipath control,
-an audited cryptographic-provider adapter, and a batched UDP runtime with
-measured allocation/copy budgets.
+The next milestones are ECN validation, coupled multipath control, an audited
+cryptographic-provider adapter, and a batched UDP runtime with measured
+allocation/copy budgets.

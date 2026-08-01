@@ -7,7 +7,8 @@ pacer. These mechanisms are implemented directly for OGTP datagrams; OGTP is
 not encapsulated in QUIC. The control laws follow
 [RFC 9438](https://www.rfc-editor.org/rfc/rfc9438.html), while the recovery
 timer and persistent-congestion rules follow
-[RFC 9002](https://www.rfc-editor.org/rfc/rfc9002.html).
+[RFC 9002](https://www.rfc-editor.org/rfc/rfc9002.html). Initial slow-start
+exit follows [RFC 9406](https://www.rfc-editor.org/rfc/rfc9406.html).
 
 ## Congestion window
 
@@ -26,6 +27,35 @@ declared lost.
 Slow start adds newly acknowledged bytes to the window. ACKs for packets sent
 before the current recovery epoch release their accounting but do not grow the
 window.
+
+## HyStart++
+
+HyStart++ is enabled by default for the initial slow start and may be disabled
+in `CubicConfig`. Its state is scalar: two optional round minima, one inclusive
+packet-number boundary, an RTT sample counter, a CSS baseline, and a CSS round
+counter.
+
+Recovery supplies at most one raw RTT sample per authenticated ACK. The
+controller groups samples into packet-number rounds and uses the RFC 9406
+constants:
+
+```text
+minimum delay threshold = 4 ms
+maximum delay threshold = 16 ms
+RTT threshold divisor   = 8
+samples per decision     = 8
+CSS growth divisor       = 4
+maximum CSS rounds       = 5
+```
+
+A round whose minimum RTT exceeds the previous round minimum by the clamped
+delay threshold enters Conservative Slow Start. CSS grows by one quarter of
+newly acknowledged bytes. A sufficiently sampled CSS round below the trigger
+baseline resumes standard slow start; persistent inflation across five rounds
+sets `ssthresh = cwnd` and enters CUBIC. Because OGTP always paces controlled
+traffic, it applies no additional per-ACK byte cap. A loss permanently ends
+HyStart++ for that connection, as subsequent slow starts have a discovered
+threshold.
 
 ## CUBIC profile
 
@@ -83,9 +113,9 @@ it never calls the loss or congestion-reduction path.
 
 The implementation still needs:
 
-- HyStart++ or an equivalently measured slow-start exit;
 - ECN negotiation, validation, and congestion response;
 - production event-loop wiring for all persistent-congestion outcomes;
+- production wiring that forwards each recovery RTT sample to HyStart++ once;
 - comparisons of fixed-point CUBIC trajectories with a high-precision model;
 - kernel pacing, UDP GSO, CPU, allocation, and fairness measurements;
 - a coupled controller for paths that share a bottleneck.

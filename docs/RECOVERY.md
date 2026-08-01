@@ -51,7 +51,9 @@ sent on its path is rejected before state mutation.
 Only a newly acknowledged `Largest Acked` packet contributes an RTT sample.
 Peer-reported ACK delay is capped at 25 ms and cannot reduce the adjusted
 sample below the minimum observed RTT. Smoothing uses integer arithmetic with
-the coefficients specified in `SPEC.md`.
+the coefficients specified in `SPEC.md`. The ACK summary exposes that single
+raw sample and largest newly acknowledged packet number so the caller can feed
+HyStart++ exactly once after processing the ACK.
 
 ## Loss and timers
 

@@ -104,8 +104,9 @@ Required measurements:
 - accuracy of the estimated-arrival-time scheduler.
 
 Congestion-control reports additionally publish initial/steady-state `cwnd`,
-bytes-in-flight, slow-start exit, CUBIC epoch transitions, PTO count, persistent
-congestion events, pacer queue delay, achieved pacing rate, and burst size.
+bytes-in-flight, HyStart++ round minima, CSS transitions, slow-start exit,
+CUBIC epoch transitions, PTO count, persistent congestion events, pacer queue
+delay, achieved pacing rate, and burst size.
 Integer CUBIC output is compared against a high-precision RFC 9438 reference
 over the full RTT/window matrix before throughput claims are accepted.
 

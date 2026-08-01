@@ -14,6 +14,12 @@ pub const CUBIC_C_NUMERATOR: u64 = 2;
 pub const CUBIC_C_DENOMINATOR: u64 = 5;
 pub const CUBIC_ALPHA_NUMERATOR: u64 = 9;
 pub const CUBIC_ALPHA_DENOMINATOR: u64 = 17;
+pub const HYSTART_MIN_RTT_THRESHOLD_MICROS: u64 = 4_000;
+pub const HYSTART_MAX_RTT_THRESHOLD_MICROS: u64 = 16_000;
+pub const HYSTART_RTT_THRESHOLD_DIVISOR: u64 = 8;
+pub const HYSTART_MIN_RTT_SAMPLES: u8 = 8;
+pub const HYSTART_CSS_GROWTH_DIVISOR: u64 = 4;
+pub const HYSTART_CSS_ROUNDS: u8 = 5;
 
 const FIXED_POINT_SHIFT: u32 = 32;
 const FIXED_POINT_ONE: u128 = 1_u128 << FIXED_POINT_SHIFT;
@@ -24,6 +30,7 @@ const MICROS_PER_SECOND_CUBED: u128 = 1_000_000_000_000_000_000;
 pub struct CubicConfig {
     max_datagram_size: u32,
     fast_convergence: bool,
+    hystart_enabled: bool,
 }
 
 impl CubicConfig {
@@ -43,7 +50,15 @@ impl CubicConfig {
         Ok(Self {
             max_datagram_size,
             fast_convergence,
+            hystart_enabled: true,
         })
+    }
+
+    /// Enables or disables `HyStart++` for the initial slow start.
+    #[must_use]
+    pub const fn with_hystart(mut self, enabled: bool) -> Self {
+        self.hystart_enabled = enabled;
+        self
     }
 
     /// Returns the path's current maximum UDP payload size.
@@ -57,6 +72,12 @@ impl CubicConfig {
     pub const fn fast_convergence(self) -> bool {
         self.fast_convergence
     }
+
+    /// Returns whether RFC 9406 `HyStart++` is enabled.
+    #[must_use]
+    pub const fn hystart_enabled(self) -> bool {
+        self.hystart_enabled
+    }
 }
 
 impl Default for CubicConfig {
@@ -64,6 +85,7 @@ impl Default for CubicConfig {
         Self {
             max_datagram_size: MIN_MAX_DATAGRAM_SIZE,
             fast_convergence: true,
+            hystart_enabled: true,
         }
     }
 }
@@ -72,7 +94,140 @@ impl Default for CubicConfig {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CongestionPhase {
     SlowStart,
+    ConservativeSlowStart,
     CongestionAvoidance,
+}
+
+/// Observable `HyStart++` transition caused by one RTT sample.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HyStartEvent {
+    None,
+    EnteredConservativeSlowStart,
+    ResumedSlowStart,
+    ExitedToCongestionAvoidance,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HyStartMode {
+    Disabled,
+    Standard,
+    Conservative,
+    Complete,
+}
+
+/// Allocation-free RFC 9406 round and delay detector.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct HyStartState {
+    mode: HyStartMode,
+    round_end_packet_number: Option<u64>,
+    last_round_min_rtt_micros: Option<u64>,
+    current_round_min_rtt_micros: Option<u64>,
+    rtt_sample_count: u8,
+    css_baseline_min_rtt_micros: Option<u64>,
+    css_rounds: u8,
+}
+
+impl HyStartState {
+    const fn new(enabled: bool) -> Self {
+        Self {
+            mode: if enabled {
+                HyStartMode::Standard
+            } else {
+                HyStartMode::Disabled
+            },
+            round_end_packet_number: None,
+            last_round_min_rtt_micros: None,
+            current_round_min_rtt_micros: None,
+            rtt_sample_count: 0,
+            css_baseline_min_rtt_micros: None,
+            css_rounds: 0,
+        }
+    }
+
+    fn observe_rtt(
+        &mut self,
+        acknowledged_packet_number: u64,
+        largest_sent_packet_number: u64,
+        raw_rtt_micros: u64,
+    ) -> Result<HyStartEvent, CongestionError> {
+        if raw_rtt_micros == 0 {
+            return Err(CongestionError::InvalidRttSample);
+        }
+        if acknowledged_packet_number > largest_sent_packet_number {
+            return Err(CongestionError::AcknowledgementExceedsLargestSent);
+        }
+        if matches!(self.mode, HyStartMode::Disabled | HyStartMode::Complete) {
+            return Ok(HyStartEvent::None);
+        }
+
+        if let Some(round_end) = self.round_end_packet_number {
+            if acknowledged_packet_number > round_end {
+                if self.mode == HyStartMode::Conservative {
+                    if self.css_rounds >= HYSTART_CSS_ROUNDS {
+                        self.mode = HyStartMode::Complete;
+                        return Ok(HyStartEvent::ExitedToCongestionAvoidance);
+                    }
+                    self.css_rounds = self.css_rounds.saturating_add(1);
+                }
+                self.last_round_min_rtt_micros = self.current_round_min_rtt_micros;
+                self.current_round_min_rtt_micros = None;
+                self.rtt_sample_count = 0;
+                self.round_end_packet_number = Some(largest_sent_packet_number);
+            }
+        } else {
+            self.round_end_packet_number = Some(largest_sent_packet_number);
+        }
+
+        self.current_round_min_rtt_micros = Some(
+            self.current_round_min_rtt_micros
+                .map_or(raw_rtt_micros, |minimum| minimum.min(raw_rtt_micros)),
+        );
+        self.rtt_sample_count = self.rtt_sample_count.saturating_add(1);
+        if self.rtt_sample_count < HYSTART_MIN_RTT_SAMPLES {
+            return Ok(HyStartEvent::None);
+        }
+
+        match self.mode {
+            HyStartMode::Standard => {
+                let (Some(last_minimum), Some(current_minimum)) = (
+                    self.last_round_min_rtt_micros,
+                    self.current_round_min_rtt_micros,
+                ) else {
+                    return Ok(HyStartEvent::None);
+                };
+                let threshold = (last_minimum / HYSTART_RTT_THRESHOLD_DIVISOR).clamp(
+                    HYSTART_MIN_RTT_THRESHOLD_MICROS,
+                    HYSTART_MAX_RTT_THRESHOLD_MICROS,
+                );
+                if current_minimum >= last_minimum.saturating_add(threshold) {
+                    self.mode = HyStartMode::Conservative;
+                    self.css_baseline_min_rtt_micros = Some(current_minimum);
+                    self.css_rounds = 1;
+                    return Ok(HyStartEvent::EnteredConservativeSlowStart);
+                }
+            }
+            HyStartMode::Conservative => {
+                if let (Some(current_minimum), Some(baseline)) = (
+                    self.current_round_min_rtt_micros,
+                    self.css_baseline_min_rtt_micros,
+                ) && current_minimum < baseline
+                {
+                    self.mode = HyStartMode::Standard;
+                    self.css_baseline_min_rtt_micros = None;
+                    self.css_rounds = 0;
+                    return Ok(HyStartEvent::ResumedSlowStart);
+                }
+            }
+            HyStartMode::Disabled | HyStartMode::Complete => {}
+        }
+        Ok(HyStartEvent::None)
+    }
+
+    fn on_congestion_signal(&mut self) {
+        if matches!(self.mode, HyStartMode::Standard | HyStartMode::Conservative) {
+            self.mode = HyStartMode::Complete;
+        }
+    }
 }
 
 /// Result of processing one loss signal.
@@ -96,6 +251,7 @@ pub struct CubicController {
     epoch_window: u64,
     estimated_reno_window_fixed: u128,
     cubic_credit_fixed: u128,
+    hystart: HyStartState,
     recovery_started_at_micros: Option<u64>,
     application_limited_since_micros: Option<u64>,
     last_event_at_micros: Option<u64>,
@@ -120,6 +276,7 @@ impl CubicController {
             epoch_window: initial_window,
             estimated_reno_window_fixed: u128::from(initial_window) << FIXED_POINT_SHIFT,
             cubic_credit_fixed: 0,
+            hystart: HyStartState::new(config.hystart_enabled),
             recovery_started_at_micros: None,
             application_limited_since_micros: None,
             last_event_at_micros: None,
@@ -192,12 +349,49 @@ impl CubicController {
         {
             return Ok(());
         }
-        if self.phase() == CongestionPhase::SlowStart {
-            self.congestion_window = self.congestion_window.saturating_add(acknowledged);
-        } else {
-            self.grow_cubic(acknowledged, now_micros, rtt);
+        match self.phase() {
+            CongestionPhase::SlowStart => {
+                self.congestion_window = self.congestion_window.saturating_add(acknowledged);
+            }
+            CongestionPhase::ConservativeSlowStart => {
+                self.congestion_window = self
+                    .congestion_window
+                    .saturating_add(acknowledged / HYSTART_CSS_GROWTH_DIVISOR);
+            }
+            CongestionPhase::CongestionAvoidance => {
+                self.grow_cubic(acknowledged, now_micros, rtt);
+            }
         }
         Ok(())
+    }
+
+    /// Feeds one newly measured raw RTT sample to `HyStart++`.
+    ///
+    /// Recovery supplies at most one sample per authenticated ACK. Packet
+    /// numbers delimit rounds without retaining a packet history. On the CSS
+    /// completion event, this method sets the slow-start threshold to the
+    /// current congestion window and begins CUBIC congestion avoidance.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a zero RTT sample or an acknowledged packet number
+    /// above the largest packet sent on this path.
+    pub fn on_rtt_sample(
+        &mut self,
+        acknowledged_packet_number: u64,
+        largest_sent_packet_number: u64,
+        raw_rtt_micros: u64,
+    ) -> Result<HyStartEvent, CongestionError> {
+        let event = self.hystart.observe_rtt(
+            acknowledged_packet_number,
+            largest_sent_packet_number,
+            raw_rtt_micros,
+        )?;
+        if event == HyStartEvent::ExitedToCongestionAvoidance {
+            self.slow_start_threshold = self.congestion_window;
+            self.reset_epoch();
+        }
+        Ok(event)
     }
 
     /// Releases lost bytes and applies at most one reduction per recovery epoch.
@@ -223,6 +417,7 @@ impl CubicController {
         let flight_before_loss = self.bytes_in_flight;
         self.bytes_in_flight -= lost;
         self.last_event_at_micros = Some(now_micros);
+        self.hystart.on_congestion_signal();
         let in_current_recovery = self
             .recovery_started_at_micros
             .is_some_and(|recovery| packet_sent_at_micros <= recovery);
@@ -295,7 +490,12 @@ impl CubicController {
     #[must_use]
     pub const fn phase(&self) -> CongestionPhase {
         if self.congestion_window < self.slow_start_threshold {
-            CongestionPhase::SlowStart
+            match self.hystart.mode {
+                HyStartMode::Conservative => CongestionPhase::ConservativeSlowStart,
+                HyStartMode::Disabled | HyStartMode::Standard | HyStartMode::Complete => {
+                    CongestionPhase::SlowStart
+                }
+            }
         } else {
             CongestionPhase::CongestionAvoidance
         }
@@ -474,7 +674,7 @@ impl Pacer {
             return Err(CongestionError::InvalidPacingInput);
         }
         let (gain_numerator, gain_denominator) = match phase {
-            CongestionPhase::SlowStart => (5_u128, 4_u128),
+            CongestionPhase::SlowStart | CongestionPhase::ConservativeSlowStart => (5_u128, 4_u128),
             CongestionPhase::CongestionAvoidance => (1_u128, 1_u128),
         };
         let numerator = u128::from(scheduled_bytes)
@@ -516,6 +716,8 @@ pub enum CongestionError {
     LossExceedsFlight,
     ClockWentBackwards,
     InvalidPacingInput,
+    InvalidRttSample,
+    AcknowledgementExceedsLargestSent,
 }
 
 impl fmt::Display for CongestionError {
@@ -533,6 +735,10 @@ impl fmt::Display for CongestionError {
             Self::LossExceedsFlight => formatter.write_str("loss exceeds bytes in flight"),
             Self::ClockWentBackwards => formatter.write_str("congestion clock moved backwards"),
             Self::InvalidPacingInput => formatter.write_str("invalid pacing input"),
+            Self::InvalidRttSample => formatter.write_str("RTT sample must be non-zero"),
+            Self::AcknowledgementExceedsLargestSent => {
+                formatter.write_str("acknowledged packet exceeds largest packet sent")
+            }
         }
     }
 }
@@ -594,12 +800,28 @@ mod tests {
         rtt
     }
 
+    fn feed_hystart_round(
+        controller: &mut CubicController,
+        first_packet: u64,
+        last_packet: u64,
+        raw_rtt_micros: u64,
+    ) -> HyStartEvent {
+        let mut event = HyStartEvent::None;
+        for packet_number in first_packet..=last_packet {
+            event = controller
+                .on_rtt_sample(packet_number, last_packet, raw_rtt_micros)
+                .expect("valid HyStart++ sample");
+        }
+        event
+    }
+
     #[test]
     fn initial_window_slow_start_and_normal_send_limit_are_bounded() {
         let mut controller = CubicController::new(CubicConfig::default());
         assert_eq!(controller.congestion_window(), 12_000);
         assert_eq!(controller.minimum_window(), 2_400);
         assert_eq!(controller.phase(), CongestionPhase::SlowStart);
+        assert!(CubicConfig::default().hystart_enabled());
         for _ in 0..10 {
             controller
                 .on_packet_sent(1_200, false)
@@ -680,6 +902,93 @@ mod tests {
     }
 
     #[test]
+    fn hystart_enters_css_after_a_sustained_delay_increase() {
+        let mut controller = CubicController::new(CubicConfig::default());
+        assert_eq!(
+            feed_hystart_round(&mut controller, 0, 7, 10_000),
+            HyStartEvent::None
+        );
+        assert_eq!(
+            feed_hystart_round(&mut controller, 8, 15, 15_000),
+            HyStartEvent::EnteredConservativeSlowStart
+        );
+        assert_eq!(controller.phase(), CongestionPhase::ConservativeSlowStart);
+
+        controller
+            .on_packet_sent(1_200, false)
+            .expect("initial window permits packet");
+        controller
+            .on_packet_acknowledged(1_200, 0, 1, sampled_rtt(10_000))
+            .expect("CSS acknowledgement applies");
+        assert_eq!(controller.congestion_window(), 12_300);
+    }
+
+    #[test]
+    fn hystart_resumes_standard_slow_start_when_delay_spike_clears() {
+        let mut controller = CubicController::new(CubicConfig::default());
+        feed_hystart_round(&mut controller, 0, 7, 10_000);
+        feed_hystart_round(&mut controller, 8, 15, 15_000);
+        assert_eq!(
+            feed_hystart_round(&mut controller, 16, 23, 9_000),
+            HyStartEvent::ResumedSlowStart
+        );
+        assert_eq!(controller.phase(), CongestionPhase::SlowStart);
+    }
+
+    #[test]
+    fn hystart_exits_to_cubic_after_five_css_rounds() {
+        let mut controller = CubicController::new(CubicConfig::default());
+        feed_hystart_round(&mut controller, 0, 7, 10_000);
+        feed_hystart_round(&mut controller, 8, 15, 15_000);
+
+        assert_eq!(
+            controller.on_rtt_sample(16, 23, 15_000),
+            Ok(HyStartEvent::None)
+        );
+        assert_eq!(
+            controller.on_rtt_sample(24, 31, 15_000),
+            Ok(HyStartEvent::None)
+        );
+        assert_eq!(
+            controller.on_rtt_sample(32, 39, 15_000),
+            Ok(HyStartEvent::None)
+        );
+        assert_eq!(
+            controller.on_rtt_sample(40, 47, 15_000),
+            Ok(HyStartEvent::None)
+        );
+        assert_eq!(
+            controller.on_rtt_sample(48, 55, 15_000),
+            Ok(HyStartEvent::ExitedToCongestionAvoidance)
+        );
+        assert_eq!(
+            controller.slow_start_threshold(),
+            controller.congestion_window()
+        );
+        assert_eq!(controller.phase(), CongestionPhase::CongestionAvoidance);
+    }
+
+    #[test]
+    fn hystart_can_be_disabled_and_rejects_invalid_samples() {
+        let config = CubicConfig::default().with_hystart(false);
+        assert!(!config.hystart_enabled());
+        let mut controller = CubicController::new(config);
+        assert_eq!(
+            feed_hystart_round(&mut controller, 0, 7, 10_000),
+            HyStartEvent::None
+        );
+        assert_eq!(controller.phase(), CongestionPhase::SlowStart);
+        assert_eq!(
+            controller.on_rtt_sample(0, 0, 0),
+            Err(CongestionError::InvalidRttSample)
+        );
+        assert_eq!(
+            controller.on_rtt_sample(1, 0, 10_000),
+            Err(CongestionError::AcknowledgementExceedsLargestSent)
+        );
+    }
+
+    #[test]
     fn pacer_uses_nanosecond_spacing_and_slow_start_gain() {
         let mut pacer = Pacer::default();
         let first = pacer
@@ -755,6 +1064,15 @@ mod tests {
                 }
             })
             .expect("recovery ACK applies");
+        controller
+            .on_rtt_sample(
+                summary
+                    .largest_newly_acknowledged
+                    .expect("ACK releases a packet"),
+                recovery.largest_sent().expect("packets were sent"),
+                summary.raw_rtt_sample_micros.expect("ACK samples RTT"),
+            )
+            .expect("HyStart++ observes the ACK sample");
         pto.on_ack(summary.acknowledged_packets != 0);
 
         assert_eq!(event_kinds, vec!["lost", "lost", "acked"]);

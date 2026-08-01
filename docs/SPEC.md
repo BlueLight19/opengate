@@ -512,6 +512,29 @@ the congestion window and the flight size immediately before the loss, never
 below `minimum_cwnd`. Further losses from packets sent before that recovery
 epoch do not reduce the window again. Fast convergence is enabled.
 
+HyStart++ is enabled only for the initial slow start. It consumes at most one
+raw RTT sample per authenticated ACK. The first sampled round ends at the
+largest packet number already sent. A later sample for a packet beyond the
+current boundary begins a new round, moves the current round's minimum RTT to
+the previous-round minimum, and sets a new boundary at the largest packet
+number sent.
+
+After at least eight samples in a round, the sender computes:
+
+```text
+delay_threshold = max(4 ms, min(previous_round_min_rtt / 8, 16 ms))
+```
+
+If the current round minimum is at least the previous minimum plus this
+threshold, the sender enters Conservative Slow Start (CSS). CSS increases the
+window by one quarter of newly acknowledged bytes. Its baseline is the minimum
+RTT that triggered CSS. If a CSS round obtains at least eight samples and its
+minimum falls below the baseline, standard slow start resumes. Otherwise, CSS
+lasts at most five rounds, including a partial transition round, and then sets
+the slow-start threshold to the current window to enter CUBIC congestion
+avoidance. A loss during either slow-start mode disables HyStart++ for the
+remainder of the connection.
+
 Congestion avoidance evaluates the RFC 9438 cubic window with fixed-point
 integer arithmetic and accumulates sub-byte growth credit. The target used for
 one RTT is bounded between the current window and 1.5 times that window.
@@ -573,7 +596,7 @@ and reject structurally invalid packet forms.
 - Independent cryptographic audit and cross-implementation validation.
 - Canonical manifest and dual-signature encoding.
 - Bit-exact CREDIT, COMMIT, and RESUME values.
-- HyStart++, ECN validation, and persistent-congestion integration with the
-  production event loop.
+- ECN validation and persistent-congestion integration with the production
+  event loop.
 - Coupled multipath congestion controller.
 - Relay negotiation and behavior.
