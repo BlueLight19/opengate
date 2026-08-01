@@ -50,6 +50,12 @@ The current `0.2` version is an early design and codec milestone:
   application-secret derivation;
 - fixed-capacity sent-packet recovery with integer RTT estimation, ACK-driven
   loss detection, and deterministic multipath reinjection selection;
+- separate fixed-capacity RX/TX datagram arenas with non-cloneable ownership
+  tokens, GRO/GSO metadata, transient-send requeue, and exact asynchronous
+  kernel-completion tracking;
+- a stable fixed-capacity monotonic timer heap with typed owners, cancellation
+  generations, deterministic equal-deadline ordering, and stale-token
+  rejection;
 - bounded PTO and persistent-congestion state, byte-counted CUBIC, and a
   nanosecond integer pacer for each path;
 - allocation-free HyStart++ with Conservative Slow Start and packet-number
@@ -90,6 +96,8 @@ This code is not production-ready and must not yet protect sensitive data.
 - [`MULTIPATH.md`](docs/MULTIPATH.md) — experimental coupled path control;
 - [`RECOVERY.md`](docs/RECOVERY.md) — bounded loss-recovery invariants;
 - [`SIMULATION.md`](docs/SIMULATION.md) — deterministic fault-model semantics.
+- [`RUNTIME.md`](docs/RUNTIME.md) — fixed UDP buffer ownership, offload
+  metadata, kernel completions, timers, and adapter contract.
 
 ## Development
 
@@ -114,5 +122,6 @@ cargo clippy --all-targets --all-features -- -D warnings
 The next milestones are independent review or replacement of the concrete
 post-quantum provider, official ML-DSA/ML-KEM differential vectors, independent
 consumption of the published encrypted-handshake vector, physical shared-
-bottleneck validation, and a batched UDP runtime with ECN ancillary data plus
+bottleneck validation, a portable nonblocking UDP socket adapter with ancillary
+metadata and batching, a capability-gated Linux `io_uring` backend, and
 measured allocation/copy budgets.

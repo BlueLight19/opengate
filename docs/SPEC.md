@@ -764,6 +764,11 @@ remain under congestion control.
 
 ## 16. Linux implementation path
 
+The platform-neutral fixed buffer queues, explicit synchronous/asynchronous TX
+ownership, GRO/GSO metadata, and bounded monotonic timer heap are implemented
+as described in [`RUNTIME.md`](RUNTIME.md). Socket syscalls and Linux-specific
+capability negotiation remain outside that core.
+
 The recommended profile is a userspace engine:
 
 1. fixed buffers registered with `io_uring`;
