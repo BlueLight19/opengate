@@ -4,9 +4,9 @@ Status: **draft 0.2 implementation contract**.
 
 This document describes the sender-side recovery state implemented in
 `src/recovery.rs`. It covers bounded packet metadata, RTT estimation,
-ACK-driven loss detection, and selection of a path for reinjection. It does not
-yet implement the congestion window, pacer, PTO state machine, or persistent
-congestion response.
+ACK-driven loss detection, PTO state, persistent-congestion detection, and
+selection of a path for reinjection. The congestion window and pacer are
+described in [`CONGESTION.md`](CONGESTION.md).
 
 ## Fixed-capacity packet state
 
@@ -37,8 +37,12 @@ Counters and byte accounting reject overflow instead of wrapping.
 ACK range membership is evaluated directly from the borrowed wire frame and
 walks no more than 33 ranges. Processing scans the fixed slot table twice:
 
-1. release newly acknowledged packets and update bytes-in-flight;
-2. release packets selected by packet or time loss thresholds.
+1. release packets selected by packet or time loss thresholds;
+2. release newly acknowledged packets and update bytes-in-flight.
+
+Loss events are emitted before acknowledgement events from the same ACK. This
+allows the congestion controller to reduce its window before considering any
+eligible ACK-driven growth.
 
 Events are delivered synchronously to a caller-provided callback. No vector or
 queue is created by the recovery layer. An ACK covering a packet number never
@@ -63,8 +67,28 @@ The estimator also exposes the base probe timeout:
 PTO = smoothed_rtt + max(4 * rtt_variance, 1 ms) + max_ack_delay
 ```
 
-Before an RTT sample, the formula uses the 333 ms initial RTT. PTO backoff,
-probe transmission, and persistent-congestion state remain release blockers.
+Before an RTT sample, the formula uses the 333 ms initial RTT. A time-threshold
+loss deadline takes precedence over PTO. Otherwise, the last ACK-eliciting send
+arms PTO while such a packet remains in flight.
+
+PTO expiration requests two probe datagrams and increases a saturating binary
+backoff. It does not declare any outstanding packet lost and does not reduce
+the congestion window. PTO probes may temporarily exceed the congestion window
+but remain charged to bytes-in-flight. A newly acknowledging ACK resets the
+backoff. The idle timeout is expected to terminate a dead path before the
+representable timer duration saturates.
+
+Persistent congestion requires at least two consecutive lost ACK-eliciting
+packets, a prior RTT sample when they were sent, no acknowledged or unresolved
+packet between them, and a send-time span of at least:
+
+```text
+3 * (smoothed_rtt + max(4 * rtt_variance, 1 ms) + max_ack_delay)
+```
+
+The allocation-free tracker accepts packet outcomes in non-decreasing send-time
+order and rejects ordering regressions. Confirmed persistent congestion
+collapses the associated CUBIC window to two maximum-sized datagrams.
 
 ## Multipath reinjection
 
@@ -82,9 +106,11 @@ original packet arrives after a successful reinjection.
 
 The test suite covers:
 
-- circular-slot exhaustion and reuse without capacity growth;
+- fixed-slot exhaustion, packet-number gaps, and reuse without capacity growth;
 - ACK ranges that simultaneously acknowledge and declare packets lost;
 - packet-threshold and time-threshold loss;
-- bounded ACK-delay RTT adjustment and PTO calculation;
+- bounded ACK-delay RTT adjustment, PTO arming/backoff/reset, and timer
+  precedence;
+- consecutive-loss persistent-congestion detection;
 - ETA selection that excludes failed paths;
 - failover reinjection followed by late delivery of the original packet.

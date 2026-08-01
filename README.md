@@ -25,6 +25,8 @@ The current `0.2` version is an early design and codec milestone:
 - reproducible AES-256-GCM and ChaCha20-Poly1305 packet vectors;
 - fixed-capacity sent-packet recovery with integer RTT estimation, ACK-driven
   loss detection, and deterministic multipath reinjection selection;
+- bounded PTO and persistent-congestion state, byte-counted CUBIC, and a
+  nanosecond integer pacer for each path;
 - an opt-in deterministic multipath fault simulator.
 
 This code is not production-ready and must not yet protect sensitive data.
@@ -35,6 +37,7 @@ This code is not production-ready and must not yet protect sensitive data.
 - [`CRYPTO.md`](docs/CRYPTO.md) — transcript, hybrid key schedule, and labels;
 - [`THREAT_MODEL.md`](docs/THREAT_MODEL.md) — guarantees, adversaries, and limits;
 - [`BENCHMARKS.md`](docs/BENCHMARKS.md) — RAM/CPU budgets and measurement plan;
+- [`CONGESTION.md`](docs/CONGESTION.md) — CUBIC, PTO, and pacing profile;
 - [`RECOVERY.md`](docs/RECOVERY.md) — bounded loss-recovery invariants;
 - [`SIMULATION.md`](docs/SIMULATION.md) — deterministic fault-model semantics.
 
@@ -48,6 +51,6 @@ cargo test --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-The next milestones are PTO/persistent-congestion handling, CUBIC and pacing,
+The next milestones are HyStart++, ECN validation, coupled multipath control,
 an audited cryptographic-provider adapter, and a batched UDP runtime with
 measured allocation/copy budgets.

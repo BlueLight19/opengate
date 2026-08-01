@@ -7,6 +7,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod congestion;
 pub mod flow;
 pub mod handshake;
 pub mod kdf;

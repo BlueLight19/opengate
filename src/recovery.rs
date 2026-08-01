@@ -21,6 +21,12 @@ pub const TIMER_GRANULARITY_MICROS: u64 = 1_000;
 pub const DEFAULT_INITIAL_RTT_MICROS: u64 = 333_000;
 /// Maximum peer-reported ACK delay accepted by the base profile.
 pub const DEFAULT_MAX_ACK_DELAY_MICROS: u64 = 25_000;
+/// Number of probe datagrams requested by one PTO expiration.
+pub const PTO_PROBE_DATAGRAMS: u8 = 2;
+/// Largest exponential backoff retained in the PTO state.
+pub const MAX_PTO_BACKOFF_EXPONENT: u32 = 63;
+/// Base-PTO multiplier used to establish persistent congestion.
+pub const PERSISTENT_CONGESTION_THRESHOLD: u64 = 3;
 
 /// Recovery timing parameters fixed for one negotiated session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -141,10 +147,25 @@ impl RttEstimator {
         self.smoothed_rtt_micros
     }
 
+    /// Returns smoothed RTT, falling back to the configured initial RTT.
+    #[must_use]
+    pub const fn effective_smoothed_rtt_micros(self) -> u64 {
+        match self.smoothed_rtt_micros {
+            Some(value) => value,
+            None => self.config.initial_rtt_micros,
+        }
+    }
+
     /// Returns the smoothed absolute RTT deviation.
     #[must_use]
     pub const fn rtt_variance_micros(self) -> Option<u64> {
         self.rtt_variance_micros
+    }
+
+    /// Returns whether at least one valid RTT sample has been recorded.
+    #[must_use]
+    pub const fn has_sample(self) -> bool {
+        self.latest_rtt_micros.is_some()
     }
 
     /// Returns the current time threshold for declaring an older packet lost.
@@ -177,11 +198,204 @@ impl RttEstimator {
             .saturating_add(variance.saturating_mul(4).max(TIMER_GRANULARITY_MICROS))
             .saturating_add(self.config.max_ack_delay_micros)
     }
+
+    /// Returns the minimum lost-packet span for persistent congestion.
+    #[must_use]
+    pub fn persistent_congestion_duration_micros(self) -> u64 {
+        self.probe_timeout_micros()
+            .saturating_mul(PERSISTENT_CONGESTION_THRESHOLD)
+    }
 }
 
 impl Default for RttEstimator {
     fn default() -> Self {
         Self::new(RecoveryConfig::default())
+    }
+}
+
+/// Currently armed recovery timer for one path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecoveryTimer {
+    /// Time-threshold loss detection takes precedence over PTO.
+    LossDetection { deadline_micros: u64 },
+    /// Probe timeout for tail loss or lost acknowledgements.
+    ProbeTimeout { deadline_micros: u64 },
+}
+
+/// Action returned when a valid PTO deadline expires.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProbeAction {
+    pub probe_datagrams: u8,
+    pub backoff_exponent: u32,
+}
+
+/// Per-path PTO arming and bounded exponential-backoff state.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ProbeTimeoutState {
+    last_ack_eliciting_sent_at_micros: Option<u64>,
+    backoff_exponent: u32,
+}
+
+impl ProbeTimeoutState {
+    /// Records the monotonic send time of an ACK-eliciting packet.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RecoveryError::ClockWentBackwards`] if the timestamp is older
+    /// than the preceding ACK-eliciting send.
+    pub fn on_ack_eliciting_sent(&mut self, sent_at_micros: u64) -> Result<(), RecoveryError> {
+        if self
+            .last_ack_eliciting_sent_at_micros
+            .is_some_and(|last| sent_at_micros < last)
+        {
+            return Err(RecoveryError::ClockWentBackwards);
+        }
+        self.last_ack_eliciting_sent_at_micros = Some(sent_at_micros);
+        Ok(())
+    }
+
+    /// Resets PTO backoff after an ACK newly acknowledges a packet.
+    pub fn on_ack(&mut self, newly_acknowledged: bool) {
+        if newly_acknowledged {
+            self.backoff_exponent = 0;
+        }
+    }
+
+    /// Selects a time-threshold loss timer or, otherwise, a PTO timer.
+    ///
+    /// Returns `None` when no ACK-eliciting packet is in flight.
+    #[must_use]
+    pub fn timer(
+        self,
+        rtt: RttEstimator,
+        loss_deadline_micros: Option<u64>,
+        has_ack_eliciting_in_flight: bool,
+    ) -> Option<RecoveryTimer> {
+        if let Some(deadline_micros) = loss_deadline_micros {
+            return Some(RecoveryTimer::LossDetection { deadline_micros });
+        }
+        if !has_ack_eliciting_in_flight {
+            return None;
+        }
+        let sent_at = self.last_ack_eliciting_sent_at_micros?;
+        Some(RecoveryTimer::ProbeTimeout {
+            deadline_micros: sent_at.saturating_add(self.duration_micros(rtt)),
+        })
+    }
+
+    /// Processes one PTO expiration without declaring any packet lost.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no PTO is armed or `now_micros` precedes its
+    /// deadline.
+    pub fn on_expiration(
+        &mut self,
+        now_micros: u64,
+        rtt: RttEstimator,
+        has_ack_eliciting_in_flight: bool,
+    ) -> Result<ProbeAction, RecoveryError> {
+        let Some(RecoveryTimer::ProbeTimeout { deadline_micros }) =
+            self.timer(rtt, None, has_ack_eliciting_in_flight)
+        else {
+            return Err(RecoveryError::ProbeTimeoutNotArmed);
+        };
+        if now_micros < deadline_micros {
+            return Err(RecoveryError::TimerNotExpired {
+                deadline_micros,
+                now_micros,
+            });
+        }
+        self.backoff_exponent = self
+            .backoff_exponent
+            .saturating_add(1)
+            .min(MAX_PTO_BACKOFF_EXPONENT);
+        Ok(ProbeAction {
+            probe_datagrams: PTO_PROBE_DATAGRAMS,
+            backoff_exponent: self.backoff_exponent,
+        })
+    }
+
+    /// Returns the current exponentially backed-off PTO duration.
+    #[must_use]
+    pub fn duration_micros(self, rtt: RttEstimator) -> u64 {
+        let multiplier = 1_u64 << self.backoff_exponent.min(MAX_PTO_BACKOFF_EXPONENT);
+        rtt.probe_timeout_micros().saturating_mul(multiplier)
+    }
+
+    /// Returns the current bounded backoff exponent.
+    #[must_use]
+    pub const fn backoff_exponent(self) -> u32 {
+        self.backoff_exponent
+    }
+}
+
+/// Outcome of one ACK-eliciting packet in send-time order.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CongestionOutcome {
+    Acknowledged,
+    Lost,
+    Outstanding,
+}
+
+/// Allocation-free detector for a consecutive lost-packet time span.
+///
+/// The integration layer feeds every ACK-eliciting packet in non-decreasing
+/// send-time order. An acknowledgement or unresolved packet breaks the run.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PersistentCongestionTracker {
+    last_observed_sent_at_micros: Option<u64>,
+    run_start_micros: Option<u64>,
+    run_end_micros: Option<u64>,
+    lost_packets_in_run: u64,
+}
+
+impl PersistentCongestionTracker {
+    /// Observes one chronologically ordered packet outcome.
+    ///
+    /// Returns `true` when at least two consecutive packets with prior RTT
+    /// knowledge are lost across the configured persistent-congestion duration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RecoveryError::OutcomeTimeWentBackwards`] for out-of-order
+    /// input.
+    pub fn observe(
+        &mut self,
+        sent_at_micros: u64,
+        outcome: CongestionOutcome,
+        rtt_sample_existed_when_sent: bool,
+        persistent_duration_micros: u64,
+    ) -> Result<bool, RecoveryError> {
+        if self
+            .last_observed_sent_at_micros
+            .is_some_and(|last| sent_at_micros < last)
+        {
+            return Err(RecoveryError::OutcomeTimeWentBackwards);
+        }
+        self.last_observed_sent_at_micros = Some(sent_at_micros);
+        if outcome != CongestionOutcome::Lost || !rtt_sample_existed_when_sent {
+            self.reset_run();
+            return Ok(false);
+        }
+        if self.run_start_micros.is_none() {
+            self.run_start_micros = Some(sent_at_micros);
+        }
+        self.run_end_micros = Some(sent_at_micros);
+        self.lost_packets_in_run = self.lost_packets_in_run.saturating_add(1);
+        let span = sent_at_micros.saturating_sub(self.run_start_micros.unwrap_or(sent_at_micros));
+        Ok(self.lost_packets_in_run >= 2 && span >= persistent_duration_micros)
+    }
+
+    /// Clears both chronological and current-run state.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn reset_run(&mut self) {
+        self.run_start_micros = None;
+        self.run_end_micros = None;
+        self.lost_packets_in_run = 0;
     }
 }
 
@@ -372,36 +586,15 @@ impl SentPacketTable {
                 .map_or(ack.largest_acked, |current| current.max(ack.largest_acked)),
         );
 
-        for index in 0..self.slots.len() {
-            let Some(packet) = self.slots[index] else {
-                continue;
-            };
-            if ack.acknowledges(packet.packet_number) {
-                self.slots[index] = None;
-                self.free_slots.push(index);
-                self.release_accounting(packet);
-                summary.acknowledged_packets += 1;
-                summary.acknowledged_bytes = summary
-                    .acknowledged_bytes
-                    .saturating_add(u64::from(packet.encoded_bytes));
-                summary.largest_newly_acknowledged = Some(
-                    summary
-                        .largest_newly_acknowledged
-                        .map_or(packet.packet_number, |current| {
-                            current.max(packet.packet_number)
-                        }),
-                );
-                visitor(RecoveryEvent::Acknowledged(packet));
-            }
-        }
-
         let largest_acknowledged = self.largest_acknowledged.unwrap_or(ack.largest_acked);
         let loss_delay = rtt.loss_delay_micros();
         for index in 0..self.slots.len() {
             let Some(packet) = self.slots[index] else {
                 continue;
             };
-            if packet.packet_number >= largest_acknowledged {
+            if ack.acknowledges(packet.packet_number)
+                || packet.packet_number >= largest_acknowledged
+            {
                 continue;
             }
             let packet_threshold =
@@ -423,6 +616,29 @@ impl SentPacketTable {
                     .lost_bytes
                     .saturating_add(u64::from(packet.encoded_bytes));
                 visitor(RecoveryEvent::Lost { packet, reason });
+            }
+        }
+
+        for index in 0..self.slots.len() {
+            let Some(packet) = self.slots[index] else {
+                continue;
+            };
+            if ack.acknowledges(packet.packet_number) {
+                self.slots[index] = None;
+                self.free_slots.push(index);
+                self.release_accounting(packet);
+                summary.acknowledged_packets += 1;
+                summary.acknowledged_bytes = summary
+                    .acknowledged_bytes
+                    .saturating_add(u64::from(packet.encoded_bytes));
+                summary.largest_newly_acknowledged = Some(
+                    summary
+                        .largest_newly_acknowledged
+                        .map_or(packet.packet_number, |current| {
+                            current.max(packet.packet_number)
+                        }),
+                );
+                visitor(RecoveryEvent::Acknowledged(packet));
             }
         }
         Ok(summary)
@@ -549,9 +765,19 @@ pub enum RecoveryError {
     PacketNumberOutOfRange(u64),
     NonMonotonicPacketNumber,
     ClockWentBackwards,
-    CapacityExhausted { oldest_packet_number: u64 },
+    CapacityExhausted {
+        oldest_packet_number: u64,
+    },
     AccountingOverflow,
-    AckForUnsentPacket { largest_acked: u64 },
+    AckForUnsentPacket {
+        largest_acked: u64,
+    },
+    ProbeTimeoutNotArmed,
+    TimerNotExpired {
+        deadline_micros: u64,
+        now_micros: u64,
+    },
+    OutcomeTimeWentBackwards,
 }
 
 impl fmt::Display for RecoveryError {
@@ -576,6 +802,17 @@ impl fmt::Display for RecoveryError {
             Self::AccountingOverflow => formatter.write_str("recovery accounting overflow"),
             Self::AckForUnsentPacket { largest_acked } => {
                 write!(formatter, "ACK covers unsent packet {largest_acked}")
+            }
+            Self::ProbeTimeoutNotArmed => formatter.write_str("probe timeout is not armed"),
+            Self::TimerNotExpired {
+                deadline_micros,
+                now_micros,
+            } => write!(
+                formatter,
+                "recovery timer deadline {deadline_micros} is after current time {now_micros}"
+            ),
+            Self::OutcomeTimeWentBackwards => {
+                formatter.write_str("congestion outcomes are not in send-time order")
             }
         }
     }
@@ -745,6 +982,77 @@ mod tests {
         assert_eq!(rtt.rtt_variance_micros(), Some(37_500));
         assert_eq!(rtt.loss_delay_micros(), 140_625);
         assert_eq!(rtt.probe_timeout_micros(), 275_000);
+    }
+
+    #[test]
+    fn pto_arms_backs_off_and_resets_without_declaring_loss() {
+        let mut rtt = RttEstimator::new(
+            RecoveryConfig::new(333_000, 25_000).expect("valid recovery configuration"),
+        );
+        rtt.record_sample(100_000, 0);
+        let mut pto = ProbeTimeoutState::default();
+        pto.on_ack_eliciting_sent(1_000).expect("clock advances");
+        let base_duration = rtt.probe_timeout_micros();
+        assert_eq!(
+            pto.timer(rtt, None, true),
+            Some(RecoveryTimer::ProbeTimeout {
+                deadline_micros: 1_000 + base_duration
+            })
+        );
+        assert!(matches!(
+            pto.on_expiration(1_000, rtt, true),
+            Err(RecoveryError::TimerNotExpired { .. })
+        ));
+        assert_eq!(
+            pto.on_expiration(1_000 + base_duration, rtt, true),
+            Ok(ProbeAction {
+                probe_datagrams: 2,
+                backoff_exponent: 1,
+            })
+        );
+        assert_eq!(pto.duration_micros(rtt), base_duration * 2);
+        pto.backoff_exponent = MAX_PTO_BACKOFF_EXPONENT;
+        assert_eq!(pto.duration_micros(rtt), u64::MAX);
+        pto.on_ack(true);
+        assert_eq!(pto.backoff_exponent(), 0);
+        assert_eq!(pto.timer(rtt, None, false), None);
+        assert_eq!(
+            pto.timer(rtt, Some(42), true),
+            Some(RecoveryTimer::LossDetection {
+                deadline_micros: 42
+            })
+        );
+    }
+
+    #[test]
+    fn persistent_congestion_requires_a_consecutive_timed_loss_run() {
+        let mut tracker = PersistentCongestionTracker::default();
+        assert_eq!(
+            tracker.observe(0, CongestionOutcome::Lost, true, 300),
+            Ok(false)
+        );
+        assert_eq!(
+            tracker.observe(300, CongestionOutcome::Lost, true, 300),
+            Ok(true)
+        );
+
+        tracker.reset();
+        assert_eq!(
+            tracker.observe(0, CongestionOutcome::Lost, true, 300),
+            Ok(false)
+        );
+        assert_eq!(
+            tracker.observe(100, CongestionOutcome::Acknowledged, true, 300),
+            Ok(false)
+        );
+        assert_eq!(
+            tracker.observe(400, CongestionOutcome::Lost, true, 300),
+            Ok(false)
+        );
+        assert_eq!(
+            tracker.observe(399, CongestionOutcome::Lost, true, 300),
+            Err(RecoveryError::OutcomeTimeWentBackwards)
+        );
     }
 
     #[test]

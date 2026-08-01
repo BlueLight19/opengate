@@ -204,6 +204,27 @@ it does not retain payload bytes. Every retransmission is a new packet on the
 selected path, uses that path's next packet number and keys, and is sealed
 again. Ciphertext, nonce, and packet number MUST NOT be reused.
 
+If a time-threshold loss deadline exists, it is the active recovery timer.
+Otherwise, an outstanding ACK-eliciting packet arms the probe timeout:
+
+```text
+PTO = smoothed_rtt + max(4 * rtt_variance, 1 ms) + max_ack_delay
+```
+
+The initial RTT of 333 ms is used before the first sample. Consecutive PTO
+expirations double the timeout with saturating arithmetic. An ACK that newly
+acknowledges a packet resets this backoff. Each expiration authorizes exactly
+two ACK-eliciting probe datagrams. It MUST NOT itself declare packets lost or
+reduce the congestion window. Probe bytes remain charged to bytes-in-flight,
+although the two probes MAY temporarily exceed the congestion window.
+
+Persistent congestion requires at least two consecutive lost ACK-eliciting
+packets that were sent after the first RTT sample. No acknowledged or still
+unresolved ACK-eliciting packet may occur between them in send-time order. The
+span from the first to the last lost packet MUST be at least three times the
+base, non-backed-off PTO. Once confirmed, the path congestion window collapses
+to its minimum of two maximum-sized datagrams.
+
 ## 9. CONTROL packets
 
 CONTROL plaintext is a sequence of canonical TLVs:
@@ -476,6 +497,37 @@ treating paths that share a bottleneck as fully independent capacity. CUBIC
 with pacing is the initial profile; a coupled multipath controller will be
 specified after measurements.
 
+For a maximum datagram size `MDS`, each path begins with:
+
+```text
+initial_cwnd = min(10 * MDS, max(2 * MDS, 14,720 bytes))
+minimum_cwnd = 2 * MDS
+```
+
+The CUBIC constants are `beta=0.7`, `C=0.4`, and Reno-friendly `alpha=9/17`
+before the previous congestion window is recovered, then `alpha=1`. Slow
+start increases the congestion window by newly acknowledged bytes. On a new
+congestion event, the slow-start threshold becomes 0.7 times the smaller of
+the congestion window and the flight size immediately before the loss, never
+below `minimum_cwnd`. Further losses from packets sent before that recovery
+epoch do not reduce the window again. Fast convergence is enabled.
+
+Congestion avoidance evaluates the RFC 9438 cubic window with fixed-point
+integer arithmetic and accumulates sub-byte growth credit. The target used for
+one RTT is bounded between the current window and 1.5 times that window.
+Application-limited time is excluded from the CUBIC epoch.
+
+The per-path pacer stores one next-departure timestamp. For a datagram or UDP
+GSO batch of `bytes`, it computes the ceiling of:
+
+```text
+spacing_ns = bytes * smoothed_rtt_us * 1,000 / (cwnd * pacing_gain)
+```
+
+The pacing gain is 5/4 in slow start and 1 in congestion avoidance. A GSO
+batch is paced by its total encoded byte count; segmentation does not make
+bytes disappear from congestion accounting.
+
 For a recovery token, the initial path selector minimizes the saturating
 integer estimate:
 
@@ -521,6 +573,7 @@ and reject structurally invalid packet forms.
 - Independent cryptographic audit and cross-implementation validation.
 - Canonical manifest and dual-signature encoding.
 - Bit-exact CREDIT, COMMIT, and RESUME values.
-- PTO, persistent-congestion, CUBIC, and pacing integration.
+- HyStart++, ECN validation, and persistent-congestion integration with the
+  production event loop.
 - Coupled multipath congestion controller.
 - Relay negotiation and behavior.
