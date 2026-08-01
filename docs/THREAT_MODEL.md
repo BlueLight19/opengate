@@ -101,6 +101,8 @@ analysis resistance.
 - Published test vectors for every derivation and packet type.
 - Continuous fuzzing of the fixed-capacity manifest and transfer-state code;
   deterministic conflicting-overlap and rollback tests already exist.
+- Stateful fuzzing of bounded Merkle carries and irregular-tree finalization;
+  deterministic reference-tree and provider-failure tests already exist.
 - Continuous fuzzing of codecs, the state machine, and handshake fragmentation.
 - Differential tests between two independent implementations.
 - A formal handshake and key-update model, for example in Tamarin or ProVerif.

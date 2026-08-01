@@ -12,6 +12,7 @@ configuration, confidence interval, and baseline comparison.
 - System calls per million datagrams.
 - Full memory copies per useful byte.
 - Peak userspace and kernel memory per connection.
+- SHA-384 cycles per chunk and Merkle internal-node cycles per object.
 - p50, p95, and p99 completion time.
 - Energy per GiB on platforms exposing reliable counters.
 - Recovery time after complete path loss.
@@ -142,6 +143,8 @@ Performance alone is insufficient. The harness includes:
 - incomplete, duplicated, overlapping, and conflicting manifest fragments;
 - manifest-pool and normalized-range capacity exhaustion;
 - replayed, interrupted, and discontinuous RESUME snapshot windows;
+- Merkle trees around every power-of-two boundary, provider failures during the
+  deepest representable carry, and root mismatch rollback;
 - invalid authentication tags;
 - key-phase changes at boundary conditions;
 - memory pressure and artificially slow storage.

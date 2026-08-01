@@ -372,7 +372,8 @@ Merkle leaf binds the object ID, chunk index, exact chunk length, and bytes.
 Internal nodes bind their level and ordered child hashes with a distinct domain
 separator. Odd nodes are duplicated; a one-leaf root is the leaf itself. The
 empty root has a separate domain. Exact inputs are specified in
-[`MANIFEST.md`](MANIFEST.md).
+[`MANIFEST.md`](MANIFEST.md), and the fixed-memory reduction algorithm is
+specified in [`MERKLE_REDUCTION.md`](MERKLE_REDUCTION.md).
 
 Because a logical manifest exceeds the baseline datagram, each MANIFEST TLV is
 a fragment:

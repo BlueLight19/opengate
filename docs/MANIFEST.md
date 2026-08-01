@@ -114,6 +114,8 @@ SHA-384("OGTP/1 empty\x00" || Object ID)
 
 Including object identity, chunk index, exact length, node level, and distinct
 domain separators prevents structural ambiguity and cross-object leaf reuse.
+The constant-memory reduction algorithm and provider boundary are specified in
+[`MERKLE_REDUCTION.md`](MERKLE_REDUCTION.md).
 
 ## CONTROL fragmentation
 
@@ -167,7 +169,8 @@ The codec and hashing inputs are provider-neutral. Production still requires:
 - an audited Ed25519 and ML-DSA-65 provider adapter;
 - event-loop admission, timeout, and signature-verification wiring around the
   implemented fixed-buffer reassembler;
-- bounded on-disk or streaming Merkle reduction;
+- event-loop integration of the implemented reducer with a bounded
+  out-of-order leaf or storage strategy;
 - fuzzing, independent vectors, and cross-implementation verification;
 - explicit policy for local filenames, overwrite behavior, and filesystem
   atomicity.

@@ -13,6 +13,7 @@ pub mod flow;
 pub mod handshake;
 pub mod kdf;
 pub mod manifest;
+pub mod merkle;
 pub mod multipath;
 pub mod protection;
 pub mod recovery;

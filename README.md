@@ -25,6 +25,8 @@ The current `0.2` version is an early design and codec milestone:
   inputs, dual-signature envelopes, and allocation-free fragment codecs;
 - fixed-pool manifest reassembly plus transactional, idempotent COMMIT and
   atomic windowed RESUME state with caller-selected range capacities;
+- provider-neutral Merkle hashing with a 32-level, 1,536-byte subtree stack
+  whose RAM use is independent of object size;
 - canonical handshake, transcript, and HKDF serializers;
 - provider-neutral in-place packet-protection orchestration with enforced AEAD
   usage limits;
@@ -52,6 +54,8 @@ This code is not production-ready and must not yet protect sensitive data.
 - [`CONGESTION.md`](docs/CONGESTION.md) — CUBIC, PTO, and pacing profile;
 - [`ECN.md`](docs/ECN.md) — ECN wire feedback and per-path validation;
 - [`MANIFEST.md`](docs/MANIFEST.md) — signed object geometry and Merkle format;
+- [`MERKLE_REDUCTION.md`](docs/MERKLE_REDUCTION.md) — fixed-memory streaming
+  verification of complete object roots;
 - [`TRANSFER_STATE.md`](docs/TRANSFER_STATE.md) — bounded MANIFEST, COMMIT, and
   RESUME runtime invariants;
 - [`MULTIPATH.md`](docs/MULTIPATH.md) — experimental coupled path control;

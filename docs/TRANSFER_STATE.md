@@ -157,5 +157,6 @@ manifests, COMMIT replay and completion regression, delta fragmentation beyond
 and atomic replacement.
 
 Production work still includes continuous stateful fuzzing, audited signature
-provider integration, bounded streaming Merkle reduction, storage durability
-policy, timeout wiring, and measurement inside the batched UDP runtime.
+and SHA-384 provider integration, bounded reorder/storage wiring around the
+implemented Merkle reducer, storage durability policy, timeout wiring, and
+measurement inside the batched UDP runtime.
