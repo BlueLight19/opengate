@@ -417,12 +417,56 @@ impl CubicController {
         let flight_before_loss = self.bytes_in_flight;
         self.bytes_in_flight -= lost;
         self.last_event_at_micros = Some(now_micros);
+        Ok(self.apply_congestion_event(
+            packet_sent_at_micros,
+            now_micros,
+            persistent_congestion,
+            flight_before_loss,
+        ))
+    }
+
+    /// Applies one validated increase in the peer's cumulative CE counter.
+    ///
+    /// This method is called from the recovery ACK-preview event, before lost
+    /// and acknowledged bytes are released. CE is equivalent to an ordinary
+    /// congestion event and can reduce the window at most once per recovery
+    /// epoch; it does not remove bytes from flight.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for clock regression or when no bytes are in flight.
+    pub fn on_ecn_ce(
+        &mut self,
+        triggering_packet_sent_at_micros: u64,
+        now_micros: u64,
+    ) -> Result<CongestionEventResult, CongestionError> {
+        self.validate_event_time(triggering_packet_sent_at_micros, now_micros)?;
+        if self.bytes_in_flight == 0 {
+            return Err(CongestionError::EcnWithoutFlight);
+        }
+        let flight_before_ack = self.bytes_in_flight;
+        self.last_event_at_micros = Some(now_micros);
+        Ok(self.apply_congestion_event(
+            triggering_packet_sent_at_micros,
+            now_micros,
+            false,
+            flight_before_ack,
+        ))
+    }
+
+    fn apply_congestion_event(
+        &mut self,
+        triggering_packet_sent_at_micros: u64,
+        now_micros: u64,
+        persistent_congestion: bool,
+        flight_before_event: u64,
+    ) -> CongestionEventResult {
         self.hystart.on_congestion_signal();
         let in_current_recovery = self
             .recovery_started_at_micros
-            .is_some_and(|recovery| packet_sent_at_micros <= recovery);
+            .is_some_and(|recovery| triggering_packet_sent_at_micros <= recovery);
         if in_current_recovery && !persistent_congestion {
-            return Ok(self.event_result(false, false));
+            return self.event_result(false, false);
         }
 
         self.congestion_window_prior = self.congestion_window;
@@ -434,7 +478,7 @@ impl CubicController {
         } else {
             self.congestion_window
         };
-        let validated_flight = flight_before_loss.min(self.congestion_window);
+        let validated_flight = flight_before_event.min(self.congestion_window);
         self.slow_start_threshold = mul_ratio(
             validated_flight,
             CUBIC_BETA_NUMERATOR,
@@ -448,7 +492,7 @@ impl CubicController {
         };
         self.recovery_started_at_micros = Some(now_micros);
         self.reset_epoch();
-        Ok(self.event_result(true, persistent_congestion))
+        self.event_result(true, persistent_congestion)
     }
 
     /// Starts or ends an application-limited period.
@@ -718,6 +762,7 @@ pub enum CongestionError {
     InvalidPacingInput,
     InvalidRttSample,
     AcknowledgementExceedsLargestSent,
+    EcnWithoutFlight,
 }
 
 impl fmt::Display for CongestionError {
@@ -738,6 +783,9 @@ impl fmt::Display for CongestionError {
             Self::InvalidRttSample => formatter.write_str("RTT sample must be non-zero"),
             Self::AcknowledgementExceedsLargestSent => {
                 formatter.write_str("acknowledged packet exceeds largest packet sent")
+            }
+            Self::EcnWithoutFlight => {
+                formatter.write_str("ECN congestion event has no bytes in flight")
             }
         }
     }
@@ -787,6 +835,7 @@ fn integer_cube_root(value: u128) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ecn::{EcnCodepoint, EcnCounts, EcnState, EcnValidationResult, EcnValidator};
     use crate::recovery::{
         ProbeTimeoutState, RecoveryConfig, RecoveryEvent, SentPacket, SentPacketTable,
     };
@@ -873,6 +922,29 @@ mod tests {
             .expect("persistent congestion applies");
         assert!(persistent.persistent_congestion);
         assert_eq!(controller.congestion_window(), 2_400);
+    }
+
+    #[test]
+    fn validated_ecn_ce_reduces_once_without_releasing_flight() {
+        let mut controller = CubicController::new(CubicConfig::default());
+        for _ in 0..10 {
+            controller
+                .on_packet_sent(1_200, false)
+                .expect("initial window permits packet");
+        }
+        let first = controller
+            .on_ecn_ce(0, 10)
+            .expect("validated CE signal applies");
+        assert!(first.window_reduced);
+        assert_eq!(controller.congestion_window(), 8_400);
+        assert_eq!(controller.bytes_in_flight(), 12_000);
+
+        let repeated = controller
+            .on_ecn_ce(5, 10)
+            .expect("same recovery epoch is ignored");
+        assert!(!repeated.window_reduced);
+        assert_eq!(controller.congestion_window(), 8_400);
+        assert_eq!(controller.bytes_in_flight(), 12_000);
     }
 
     #[test]
@@ -1030,6 +1102,7 @@ mod tests {
                     packet_number,
                     sent_at_micros,
                     encoded_bytes: 1_200,
+                    ecn_codepoint: crate::ecn::EcnCodepoint::NotEct,
                     recovery_token: None,
                 })
                 .expect("recovery slot is available");
@@ -1045,6 +1118,7 @@ mod tests {
         let mut event_kinds = Vec::new();
         let summary = recovery
             .on_ack(ack, 10_000, &mut rtt, |event| match event {
+                RecoveryEvent::AckPreview(_) => {}
                 RecoveryEvent::Lost { packet, .. } => {
                     event_kinds.push("lost");
                     controller
@@ -1079,5 +1153,88 @@ mod tests {
         assert_eq!(controller.congestion_window(), 4_200);
         assert_eq!(controller.bytes_in_flight(), 2_400);
         assert_eq!(pto.backoff_exponent(), 0);
+    }
+
+    #[test]
+    fn authenticated_ecn_preview_reduces_before_ack_events() {
+        let mut controller = CubicController::new(CubicConfig::default());
+        let mut recovery = SentPacketTable::with_capacity(8).expect("valid recovery capacity");
+        let mut ecn = EcnValidator::new(true);
+        for packet_number in 0..5 {
+            let codepoint = ecn.outgoing_codepoint();
+            assert_eq!(codepoint, EcnCodepoint::Ect0);
+            ecn.on_packet_sent(codepoint)
+                .expect("ECT(0) probe is permitted");
+            controller
+                .on_packet_sent(1_200, false)
+                .expect("initial window permits packet");
+            recovery
+                .record(SentPacket {
+                    packet_number,
+                    sent_at_micros: packet_number,
+                    encoded_bytes: 1_200,
+                    ecn_codepoint: codepoint,
+                    recovery_token: None,
+                })
+                .expect("recovery slot is available");
+        }
+
+        let counts = EcnCounts {
+            ect0: 4,
+            ect1: 0,
+            ce: 1,
+        };
+        let mut ack_bytes = [0_u8; 64];
+        let ack_length = AckFrame::encode_with_ecn(4, 0, 5, &[], Some(counts), &mut ack_bytes)
+            .expect("ECN ACK encodes");
+        let ack = AckFrame::decode(&ack_bytes[..ack_length]).expect("ECN ACK decodes");
+        let mut rtt = RttEstimator::default();
+        let event_rtt = rtt;
+        let mut event_kinds = Vec::new();
+        let summary = recovery
+            .on_ack(ack, 10_000, &mut rtt, |event| match event {
+                RecoveryEvent::AckPreview(preview) => {
+                    event_kinds.push("preview");
+                    let result = ecn.validate_ack(
+                        preview
+                            .largest_newly_acknowledged
+                            .expect("ACK releases marked packets"),
+                        preview.acknowledged_ect0_packets,
+                        preview.acknowledged_ect1_packets,
+                        preview.peer_ecn_counts,
+                    );
+                    assert_eq!(result, EcnValidationResult::Validated { ce_increase: 1 });
+                    controller
+                        .on_ecn_ce(
+                            preview
+                                .largest_newly_acknowledged_sent_at_micros
+                                .expect("preview retains trigger send time"),
+                            10_000,
+                        )
+                        .expect("validated CE enters recovery");
+                }
+                RecoveryEvent::Lost { .. } => event_kinds.push("lost"),
+                RecoveryEvent::Acknowledged(packet) => {
+                    event_kinds.push("acked");
+                    controller
+                        .on_packet_acknowledged(
+                            packet.encoded_bytes,
+                            packet.sent_at_micros,
+                            10_000,
+                            event_rtt,
+                        )
+                        .expect("ACK accounting matches");
+                }
+            })
+            .expect("ECN ACK applies");
+
+        assert_eq!(
+            event_kinds,
+            vec!["preview", "acked", "acked", "acked", "acked", "acked"]
+        );
+        assert_eq!(summary.acknowledged_ect0_packets, 5);
+        assert_eq!(ecn.state(), EcnState::Capable);
+        assert_eq!(controller.congestion_window(), 4_200);
+        assert_eq!(controller.bytes_in_flight(), 0);
     }
 }

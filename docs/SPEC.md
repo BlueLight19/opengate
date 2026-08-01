@@ -145,13 +145,16 @@ duplicates are ignored.
 ACK plaintext is encoded as:
 
 ```text
-Largest Acked u64 | ACK Delay usec u32 | First Range Length u16 | Count u8
+Largest Acked u64 | ACK Delay usec u32 | First Range Length u16
+                  | Count and Flags u8
                   | Count * (Gap u16 | Range Length u16)
+                  | Optional ECN Counters[24]
 ```
 
 `First Range Length` is the number of contiguous acknowledged packets ending at
-`Largest Acked` and MUST be non-zero. `Count` is the number of additional ranges
-and MUST NOT exceed 32. For every additional range:
+`Largest Acked` and MUST be non-zero. In `Count and Flags`, bit 7 indicates ECN
+counters, bit 6 is zero, and bits 5..0 contain the number of additional ranges.
+The range count MUST NOT exceed 32. For every additional range:
 
 - `Gap` is the non-zero number of unacknowledged packet numbers below the
   preceding range;
@@ -161,6 +164,25 @@ and MUST NOT exceed 32. For every additional range:
 For example, `Largest=100`, `First Length=3`, `Gap=2`, and `Range Length=4`
 acknowledges `[98,100]` and `[92,95]`. Underflow or a non-canonical zero value is
 a protocol error.
+
+When ECN capability bit 3 was negotiated and bit 7 is set, the ACK ends with:
+
+```text
+ECT(0) Count u64 | ECT(1) Count u64 | CE Count u64
+```
+
+These are cumulative, path-local counts of newly authenticated, non-duplicate
+UDP datagrams by their received IP ECN codepoint. The counters are inside the
+AEAD-protected ACK plaintext. An endpoint MUST NOT send this trailer without
+negotiation, and bit 6 or trailing bytes are a protocol error.
+
+The base sender marks ECT(0), never ECT(1). A new path sends at most ten ECT(0)
+validation probes. Valid feedback must be monotonic, must cover every newly
+acknowledged ECT-marked packet, and cannot report more packets than the sender
+marked. An ACK that does not advance `Largest Acked` is ignored for validation
+so reordering cannot disable ECN. Missing, decreasing, rewritten, excessive,
+or entirely lost validation feedback disables ECN on that path and subsequent
+datagrams use Not-ECT.
 
 ACKs are path-local. They confirm network receipt and authentication, not
 durable storage. Old ranges MAY be discarded to respect the advertised memory
@@ -413,9 +435,9 @@ Client Random[32] | Identity Fingerprint[48] | Cipher Bitmap u16
 
 HELLO is exactly 90 bytes. Cipher Bitmap bit 0 offers AES-256-GCM-SHA384 and
 bit 1 offers ChaCha20-Poly1305-SHA384. At least one known bit is required.
-Capability bit 0 requests multipath, bit 1 resume, and bit 2 periodic hybrid PQ
-rekey. Unknown capability bits are ignored. `Max UDP Payload` is at least 1,200
-and `Max Paths` is between 1 and 16.
+Capability bit 0 requests multipath, bit 1 resume, bit 2 periodic hybrid PQ
+rekey, and bit 3 ECN feedback. Unknown capability bits are ignored. `Max UDP
+Payload` is at least 1,200 and `Max Paths` is between 1 and 16.
 
 #### RETRY
 
@@ -535,6 +557,12 @@ the slow-start threshold to the current window to enter CUBIC congestion
 avoidance. A loss during either slow-start mode disables HyStart++ for the
 remainder of the connection.
 
+A successfully validated increase in the authenticated CE counter is a CUBIC
+congestion event equivalent to loss. ECN feedback is processed before loss and
+acknowledgement events from the same ACK. It does not release bytes-in-flight,
+and loss plus CE can reduce the congestion window at most once in one recovery
+epoch. Persistent congestion may still collapse the window to its minimum.
+
 Congestion avoidance evaluates the RFC 9438 cubic window with fixed-point
 integer arithmetic and accumulates sub-byte growth credit. The target used for
 one RTT is bounded between the current window and 1.5 times that window.
@@ -596,7 +624,7 @@ and reject structurally invalid packet forms.
 - Independent cryptographic audit and cross-implementation validation.
 - Canonical manifest and dual-signature encoding.
 - Bit-exact CREDIT, COMMIT, and RESUME values.
-- ECN validation and persistent-congestion integration with the production
+- Persistent-congestion and ECN ancillary-data integration with the production
   event loop.
 - Coupled multipath congestion controller.
 - Relay negotiation and behavior.

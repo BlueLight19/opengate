@@ -70,6 +70,7 @@ analysis resistance.
 | Future quantum decryption | Ephemeral X25519 + ML-KEM-768 | Implementation flaw or break of both families |
 | Nonce reuse | Separate key per DCID, monotonic packet number, close before limit | State bug or snapshot restore |
 | Replay | Per-path packet-number window and sequenced CONTROL messages | CPU spent before rejection |
+| ECN suppression or rewriting | Authenticated cumulative counters, sender-mark validation, per-path fallback to Not-ECT | An on-path attacker can still add CE or drop/delay traffic |
 | UDP amplification | Stateless RETRY and 3x amplification limit | Botnet using valid source addresses |
 | Handshake RAM exhaustion | Cookie before state, message limit, global and per-source quotas | Distributed source addresses |
 | DATA RAM exhaustion | Credits, fixed pools, manifest bounds | Lower throughput under pressure |
@@ -102,4 +103,3 @@ analysis resistance.
 - Analysis and enforcement of AEAD usage limits.
 - Independent cryptographic and systems audits.
 - A vulnerability reporting program and wire-version rotation strategy.
-

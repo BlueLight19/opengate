@@ -110,6 +110,11 @@ delay, achieved pacing rate, and burst size.
 Integer CUBIC output is compared against a high-precision RFC 9438 reference
 over the full RTT/window matrix before throughput claims are accepted.
 
+ECN runs additionally report negotiated capability, sender codepoints,
+receiver ECT(0)/ECT(1)/CE counters, validation transitions, validation failures,
+CE-triggered recovery epochs, and whether each physical or emulated path
+bleaches, rewrites, or drops ECT-marked traffic.
+
 ## Security and robustness workload
 
 Performance alone is insufficient. The harness includes:

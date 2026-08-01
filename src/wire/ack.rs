@@ -1,13 +1,20 @@
 //! Allocation-free codec for ACK packet plaintext.
 
 use super::{WireError, read_u16, read_u32, read_u64};
+use crate::ecn::EcnCounts;
 
 /// Bytes before the first additional ACK range.
 pub const ACK_BASE_LEN: usize = 15;
 /// Encoded size of every additional ACK range.
 pub const ACK_RANGE_LEN: usize = 4;
+/// Encoded size of cumulative ECT(0), ECT(1), and CE counters.
+pub const ACK_ECN_COUNTS_LEN: usize = 24;
 /// Maximum number of additional ranges in one ACK packet.
 pub const MAX_ADDITIONAL_ACK_RANGES: usize = 32;
+
+const ACK_ECN_PRESENT_BIT: u8 = 0x80;
+const ACK_RESERVED_FLAG_BIT: u8 = 0x40;
+const ACK_RANGE_COUNT_MASK: u8 = 0x3f;
 
 /// One acknowledged range below the preceding range.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -25,6 +32,7 @@ pub struct AckFrame<'a> {
     pub ack_delay_micros: u32,
     pub first_range_length: u16,
     encoded_ranges: &'a [u8],
+    ecn_counts: Option<EcnCounts>,
 }
 
 impl<'a> AckFrame<'a> {
@@ -39,6 +47,29 @@ impl<'a> AckFrame<'a> {
         ack_delay_micros: u32,
         first_range_length: u16,
         additional_ranges: &[AckRange],
+        output: &mut [u8],
+    ) -> Result<usize, WireError> {
+        Self::encode_with_ecn(
+            largest_acked,
+            ack_delay_micros,
+            first_range_length,
+            additional_ranges,
+            None,
+            output,
+        )
+    }
+
+    /// Encodes a canonical ACK with optional cumulative ECN counters.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::encode`].
+    pub fn encode_with_ecn(
+        largest_acked: u64,
+        ack_delay_micros: u32,
+        first_range_length: u16,
+        additional_ranges: &[AckRange],
+        ecn_counts: Option<EcnCounts>,
         output: &mut [u8],
     ) -> Result<usize, WireError> {
         if additional_ranges.len() > MAX_ADDITIONAL_ACK_RANGES {
@@ -57,8 +88,11 @@ impl<'a> AckFrame<'a> {
             .len()
             .checked_mul(ACK_RANGE_LEN)
             .ok_or(WireError::LengthOverflow)?;
-        let needed = ACK_BASE_LEN
+        let ranges_end = ACK_BASE_LEN
             .checked_add(ranges_len)
+            .ok_or(WireError::LengthOverflow)?;
+        let needed = ranges_end
+            .checked_add(ecn_counts.map_or(0, |_| ACK_ECN_COUNTS_LEN))
             .ok_or(WireError::LengthOverflow)?;
         if output.len() < needed {
             return Err(WireError::BufferTooSmall {
@@ -74,13 +108,22 @@ impl<'a> AckFrame<'a> {
             u8::try_from(additional_ranges.len()).map_err(|_| WireError::TooManyAckRanges {
                 count: additional_ranges.len(),
                 maximum: MAX_ADDITIONAL_ACK_RANGES,
-            })?;
+            })? | if ecn_counts.is_some() {
+                ACK_ECN_PRESENT_BIT
+            } else {
+                0
+            };
 
         let mut offset = ACK_BASE_LEN;
         for range in additional_ranges {
             output[offset..offset + 2].copy_from_slice(&range.gap.to_be_bytes());
             output[offset + 2..offset + 4].copy_from_slice(&range.length.to_be_bytes());
             offset += ACK_RANGE_LEN;
+        }
+        if let Some(counts) = ecn_counts {
+            output[ranges_end..ranges_end + 8].copy_from_slice(&counts.ect0.to_be_bytes());
+            output[ranges_end + 8..ranges_end + 16].copy_from_slice(&counts.ect1.to_be_bytes());
+            output[ranges_end + 16..ranges_end + 24].copy_from_slice(&counts.ce.to_be_bytes());
         }
         Ok(needed)
     }
@@ -99,19 +142,31 @@ impl<'a> AckFrame<'a> {
             });
         }
 
-        let range_count = usize::from(input[14]);
+        let count_and_flags = input[14];
+        if count_and_flags & ACK_RESERVED_FLAG_BIT != 0 {
+            return Err(WireError::InvalidAckFlags(count_and_flags));
+        }
+        let has_ecn_counts = count_and_flags & ACK_ECN_PRESENT_BIT != 0;
+        let range_count = usize::from(count_and_flags & ACK_RANGE_COUNT_MASK);
         if range_count > MAX_ADDITIONAL_ACK_RANGES {
             return Err(WireError::TooManyAckRanges {
                 count: range_count,
                 maximum: MAX_ADDITIONAL_ACK_RANGES,
             });
         }
-        let expected = ACK_BASE_LEN
+        let ranges_end = ACK_BASE_LEN
             .checked_add(
                 range_count
                     .checked_mul(ACK_RANGE_LEN)
                     .ok_or(WireError::LengthOverflow)?,
             )
+            .ok_or(WireError::LengthOverflow)?;
+        let expected = ranges_end
+            .checked_add(if has_ecn_counts {
+                ACK_ECN_COUNTS_LEN
+            } else {
+                0
+            })
             .ok_or(WireError::LengthOverflow)?;
         if input.len() < expected {
             return Err(WireError::PacketTooShort {
@@ -130,7 +185,16 @@ impl<'a> AckFrame<'a> {
             largest_acked: read_u64(input, 0)?,
             ack_delay_micros: read_u32(input, 8)?,
             first_range_length: read_u16(input, 12)?,
-            encoded_ranges: &input[ACK_BASE_LEN..],
+            encoded_ranges: &input[ACK_BASE_LEN..ranges_end],
+            ecn_counts: if has_ecn_counts {
+                Some(EcnCounts {
+                    ect0: read_u64(input, ranges_end)?,
+                    ect1: read_u64(input, ranges_end + 8)?,
+                    ce: read_u64(input, ranges_end + 16)?,
+                })
+            } else {
+                None
+            },
         };
         validate_ranges(
             frame.largest_acked,
@@ -152,6 +216,12 @@ impl<'a> AckFrame<'a> {
         AckRangeIter {
             remaining: self.encoded_ranges,
         }
+    }
+
+    /// Returns authenticated cumulative ECN counters when negotiated.
+    #[must_use]
+    pub const fn ecn_counts(self) -> Option<EcnCounts> {
+        self.ecn_counts
     }
 
     /// Returns whether this frame acknowledges `packet_number`.
@@ -249,6 +319,33 @@ mod tests {
         assert_eq!(decoded.first_range_length, 3);
         assert_eq!(decoded.additional_range_count(), 2);
         assert_eq!(decoded.additional_ranges().collect::<Vec<_>>(), ranges);
+        assert_eq!(decoded.ecn_counts(), None);
+    }
+
+    #[test]
+    fn ack_round_trip_preserves_ecn_counts() {
+        let counts = EcnCounts {
+            ect0: 100,
+            ect1: 2,
+            ce: 7,
+        };
+        let mut output = [0_u8; 64];
+        let written = AckFrame::encode_with_ecn(9, 10, 2, &[], Some(counts), &mut output)
+            .expect("ECN ACK encodes");
+        assert_eq!(written, ACK_BASE_LEN + ACK_ECN_COUNTS_LEN);
+        let decoded = AckFrame::decode(&output[..written]).expect("ECN ACK decodes");
+        assert_eq!(decoded.ecn_counts(), Some(counts));
+    }
+
+    #[test]
+    fn reserved_ack_flag_is_rejected() {
+        let mut output = [0_u8; ACK_BASE_LEN];
+        AckFrame::encode(0, 0, 1, &[], &mut output).expect("ACK encodes");
+        output[14] = ACK_RESERVED_FLAG_BIT;
+        assert_eq!(
+            AckFrame::decode(&output),
+            Err(WireError::InvalidAckFlags(ACK_RESERVED_FLAG_BIT))
+        );
     }
 
     #[test]

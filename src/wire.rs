@@ -286,6 +286,7 @@ pub enum WireError {
     LengthMismatch { expected: usize, actual: usize },
     TooManyAckRanges { count: usize, maximum: usize },
     InvalidAckRanges,
+    InvalidAckFlags(u8),
     FrameValueTooLarge { length: usize, maximum: usize },
     UnknownProbeKind(u8),
     NonZeroProbePadding,
@@ -325,6 +326,7 @@ impl fmt::Display for WireError {
                 write!(formatter, "too many ACK ranges: {count}, maximum {maximum}")
             }
             Self::InvalidAckRanges => formatter.write_str("invalid ACK ranges"),
+            Self::InvalidAckFlags(flags) => write!(formatter, "invalid ACK flags: {flags:#x}"),
             Self::FrameValueTooLarge { length, maximum } => {
                 write!(
                     formatter,

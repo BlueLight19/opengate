@@ -29,6 +29,8 @@ The current `0.2` version is an early design and codec milestone:
   nanosecond integer pacer for each path;
 - allocation-free HyStart++ with Conservative Slow Start and packet-number
   round tracking;
+- negotiated per-path ECN probing, authenticated cumulative feedback, strict
+  validation, and loss-equivalent CUBIC response;
 - an opt-in deterministic multipath fault simulator.
 
 This code is not production-ready and must not yet protect sensitive data.
@@ -40,6 +42,7 @@ This code is not production-ready and must not yet protect sensitive data.
 - [`THREAT_MODEL.md`](docs/THREAT_MODEL.md) — guarantees, adversaries, and limits;
 - [`BENCHMARKS.md`](docs/BENCHMARKS.md) — RAM/CPU budgets and measurement plan;
 - [`CONGESTION.md`](docs/CONGESTION.md) — CUBIC, PTO, and pacing profile;
+- [`ECN.md`](docs/ECN.md) — ECN wire feedback and per-path validation;
 - [`RECOVERY.md`](docs/RECOVERY.md) — bounded loss-recovery invariants;
 - [`SIMULATION.md`](docs/SIMULATION.md) — deterministic fault-model semantics.
 
@@ -53,6 +56,6 @@ cargo test --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-The next milestones are ECN validation, coupled multipath control, an audited
-cryptographic-provider adapter, and a batched UDP runtime with measured
-allocation/copy budgets.
+The next milestones are coupled multipath control, an audited cryptographic
+provider adapter, and a batched UDP runtime with ECN ancillary data plus
+measured allocation/copy budgets.

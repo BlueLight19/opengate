@@ -20,6 +20,7 @@ A slot retains only:
 - the 62-bit packet number;
 - its monotonic send timestamp;
 - encoded bytes charged to bytes-in-flight;
+- the IP ECN codepoint applied to the datagram;
 - an optional stable recovery token.
 
 The token identifies DATA metadata or an idempotent control operation. It does
@@ -35,14 +36,17 @@ Counters and byte accounting reject overflow instead of wrapping.
 ## ACK processing
 
 ACK range membership is evaluated directly from the borrowed wire frame and
-walks no more than 33 ranges. Processing scans the fixed slot table twice:
+walks no more than 33 ranges. Processing first emits a copy-only ACK preview,
+then scans the fixed slot table twice:
 
-1. release packets selected by packet or time loss thresholds;
-2. release newly acknowledged packets and update bytes-in-flight.
+1. validate ECN and enter a congestion epoch when authenticated CE increased;
+2. release packets selected by packet or time loss thresholds;
+3. release newly acknowledged packets and update bytes-in-flight.
 
-Loss events are emitted before acknowledgement events from the same ACK. This
-allows the congestion controller to reduce its window before considering any
-eligible ACK-driven growth.
+The preview and loss events are emitted before acknowledgement events from the
+same ACK. This allows the congestion controller to reduce its window before
+considering any eligible ACK-driven growth. The summary separately reports
+acknowledged and lost ECT(0)/ECT(1) packet counts for the per-path validator.
 
 Events are delivered synchronously to a caller-provided callback. No vector or
 queue is created by the recovery layer. An ACK covering a packet number never

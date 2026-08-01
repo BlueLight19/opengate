@@ -5,6 +5,7 @@
 
 use core::fmt;
 
+use crate::ecn::{EcnCodepoint, EcnCounts};
 use crate::protection::MAX_PACKET_NUMBER;
 use crate::wire::DataMetadata;
 use crate::wire::ack::AckFrame;
@@ -414,6 +415,7 @@ pub struct SentPacket {
     pub packet_number: u64,
     pub sent_at_micros: u64,
     pub encoded_bytes: u32,
+    pub ecn_codepoint: EcnCodepoint,
     pub recovery_token: Option<RecoveryToken>,
 }
 
@@ -427,6 +429,8 @@ pub enum LossReason {
 /// Allocation-free callback event produced while processing an ACK.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RecoveryEvent {
+    /// Aggregate ACK metadata delivered before any congestion or ACK event.
+    AckPreview(AckPreview),
     Acknowledged(SentPacket),
     Lost {
         packet: SentPacket,
@@ -442,7 +446,28 @@ pub struct AckSummary {
     pub lost_packets: usize,
     pub lost_bytes: u64,
     pub largest_newly_acknowledged: Option<u64>,
+    pub largest_newly_acknowledged_sent_at_micros: Option<u64>,
     pub raw_rtt_sample_micros: Option<u64>,
+    pub acknowledged_ect0_packets: u64,
+    pub acknowledged_ect1_packets: u64,
+    pub lost_ect0_packets: u64,
+    pub lost_ect1_packets: u64,
+}
+
+/// Newly acknowledged metadata exposed before congestion events are emitted.
+///
+/// This preview lets the caller validate authenticated ECN counts and enter a
+/// recovery epoch before ACK-driven congestion-window growth is processed.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AckPreview {
+    pub acknowledged_packets: usize,
+    pub acknowledged_bytes: u64,
+    pub acknowledged_ect0_packets: u64,
+    pub acknowledged_ect1_packets: u64,
+    pub largest_newly_acknowledged: Option<u64>,
+    pub largest_newly_acknowledged_sent_at_micros: Option<u64>,
+    pub raw_rtt_sample_micros: Option<u64>,
+    pub peer_ecn_counts: Option<EcnCounts>,
 }
 
 /// Fixed-capacity per-path sent-packet ledger.
@@ -586,6 +611,9 @@ impl SentPacketTable {
                 .map_or(ack.largest_acked, |current| current.max(ack.largest_acked)),
         );
 
+        let preview = self.preview_ack(ack, summary.raw_rtt_sample_micros);
+        visitor(RecoveryEvent::AckPreview(preview));
+
         let largest_acknowledged = self.largest_acknowledged.unwrap_or(ack.largest_acked);
         let loss_delay = rtt.loss_delay_micros();
         for index in 0..self.slots.len() {
@@ -615,6 +643,11 @@ impl SentPacketTable {
                 summary.lost_bytes = summary
                     .lost_bytes
                     .saturating_add(u64::from(packet.encoded_bytes));
+                account_ecn_codepoint(
+                    &mut summary.lost_ect0_packets,
+                    &mut summary.lost_ect1_packets,
+                    packet.ecn_codepoint,
+                );
                 visitor(RecoveryEvent::Lost { packet, reason });
             }
         }
@@ -631,6 +664,17 @@ impl SentPacketTable {
                 summary.acknowledged_bytes = summary
                     .acknowledged_bytes
                     .saturating_add(u64::from(packet.encoded_bytes));
+                account_ecn_codepoint(
+                    &mut summary.acknowledged_ect0_packets,
+                    &mut summary.acknowledged_ect1_packets,
+                    packet.ecn_codepoint,
+                );
+                if summary
+                    .largest_newly_acknowledged
+                    .is_none_or(|largest| packet.packet_number > largest)
+                {
+                    summary.largest_newly_acknowledged_sent_at_micros = Some(packet.sent_at_micros);
+                }
                 summary.largest_newly_acknowledged = Some(
                     summary
                         .largest_newly_acknowledged
@@ -672,6 +716,36 @@ impl SentPacketTable {
     #[must_use]
     pub const fn largest_acknowledged(&self) -> Option<u64> {
         self.largest_acknowledged
+    }
+
+    fn preview_ack(&self, ack: AckFrame<'_>, raw_rtt_sample_micros: Option<u64>) -> AckPreview {
+        let mut preview = AckPreview {
+            raw_rtt_sample_micros,
+            peer_ecn_counts: ack.ecn_counts(),
+            ..AckPreview::default()
+        };
+        for packet in self.slots.iter().flatten().copied() {
+            if !ack.acknowledges(packet.packet_number) {
+                continue;
+            }
+            preview.acknowledged_packets = preview.acknowledged_packets.saturating_add(1);
+            preview.acknowledged_bytes = preview
+                .acknowledged_bytes
+                .saturating_add(u64::from(packet.encoded_bytes));
+            account_ecn_codepoint(
+                &mut preview.acknowledged_ect0_packets,
+                &mut preview.acknowledged_ect1_packets,
+                packet.ecn_codepoint,
+            );
+            if preview
+                .largest_newly_acknowledged
+                .is_none_or(|largest| packet.packet_number > largest)
+            {
+                preview.largest_newly_acknowledged = Some(packet.packet_number);
+                preview.largest_newly_acknowledged_sent_at_micros = Some(packet.sent_at_micros);
+            }
+        }
+        preview
     }
 
     fn find(&self, packet_number: u64) -> Option<SentPacket> {
@@ -827,6 +901,14 @@ fn weighted_average(previous: u64, sample: u64, previous_weight: u64, divisor: u
     u64::try_from(weighted / u128::from(divisor)).unwrap_or(u64::MAX)
 }
 
+fn account_ecn_codepoint(ect0: &mut u64, ect1: &mut u64, codepoint: EcnCodepoint) {
+    match codepoint {
+        EcnCodepoint::Ect0 => *ect0 = ect0.saturating_add(1),
+        EcnCodepoint::Ect1 => *ect1 = ect1.saturating_add(1),
+        EcnCodepoint::NotEct | EcnCodepoint::Ce => {}
+    }
+}
+
 fn scale_ceil(value: u64, numerator: u64, denominator: u64) -> u64 {
     let scaled = u128::from(value)
         .saturating_mul(u128::from(numerator))
@@ -846,6 +928,7 @@ mod tests {
             packet_number,
             sent_at_micros,
             encoded_bytes: 1_200,
+            ecn_codepoint: EcnCodepoint::NotEct,
             recovery_token: Some(RecoveryToken::Control(packet_number)),
         }
     }
@@ -1197,6 +1280,7 @@ mod tests {
                 packet_number: 0,
                 sent_at_micros: network.now(),
                 encoded_bytes: 1_200,
+                ecn_codepoint: EcnCodepoint::NotEct,
                 recovery_token: Some(token),
             })
             .expect("target packet fits");

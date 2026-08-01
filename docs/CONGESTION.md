@@ -9,6 +9,9 @@ not encapsulated in QUIC. The control laws follow
 timer and persistent-congestion rules follow
 [RFC 9002](https://www.rfc-editor.org/rfc/rfc9002.html). Initial slow-start
 exit follows [RFC 9406](https://www.rfc-editor.org/rfc/rfc9406.html).
+ECN codepoints follow [RFC 3168](https://www.rfc-editor.org/rfc/rfc3168.html),
+with a validation strategy adapted from
+[RFC 9000](https://www.rfc-editor.org/rfc/rfc9000.html#section-13.4.2).
 
 ## Congestion window
 
@@ -56,6 +59,19 @@ sets `ssthresh = cwnd` and enters CUBIC. Because OGTP always paces controlled
 traffic, it applies no additional per-ACK byte cap. A loss permanently ends
 HyStart++ for that connection, as subsequent slow starts have a discovered
 threshold.
+
+## ECN congestion events
+
+An ACK-preview event exposes authenticated peer counters and newly acknowledged
+packet markings before any loss or acknowledgement callback. The per-path ECN
+validator either disables marking or returns the validated CE-counter increase.
+A non-zero increase calls `on_ecn_ce` while all pre-ACK bytes remain in flight.
+
+CE uses the same CUBIC reduction and recovery-epoch suppression as loss, but it
+does not remove a packet or recovery token. ACK callbacks that follow cannot
+grow the window for packets sent before that recovery epoch. If the ACK also
+declares loss, the later loss event releases bytes without applying a second
+ordinary reduction.
 
 ## CUBIC profile
 
@@ -113,9 +129,9 @@ it never calls the loss or congestion-reduction path.
 
 The implementation still needs:
 
-- ECN negotiation, validation, and congestion response;
 - production event-loop wiring for all persistent-congestion outcomes;
 - production wiring that forwards each recovery RTT sample to HyStart++ once;
+- kernel ancillary-data wiring and physical-path ECN bleaching tests;
 - comparisons of fixed-point CUBIC trajectories with a high-precision model;
 - kernel pacing, UDP GSO, CPU, allocation, and fairness measurements;
 - a coupled controller for paths that share a bottleneck.
