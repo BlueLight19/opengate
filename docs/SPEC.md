@@ -515,9 +515,10 @@ ETA = pacer_delay + RTT/2 + queued_bytes/estimated_rate + loss_penalty
 ```
 
 A retransmission MAY use a different path. The implementation MUST avoid
-treating paths that share a bottleneck as fully independent capacity. CUBIC
-with pacing is the initial profile; a coupled multipath controller will be
-specified after measurements.
+treating paths that share a bottleneck as fully independent capacity. When
+more than one validated path is concurrently eligible for DATA, the sender
+MUST apply the coupled congestion-avoidance profile below. No more than 16
+paths may participate in one coupling group.
 
 For a maximum datagram size `MDS`, each path begins with:
 
@@ -567,6 +568,39 @@ Congestion avoidance evaluates the RFC 9438 cubic window with fixed-point
 integer arithmetic and accumulates sub-byte growth credit. The target used for
 one RTT is bounded between the current window and 1.5 times that window.
 Application-limited time is excluded from the CUBIC epoch.
+
+Concurrent paths couple their increases using an integer profile derived from
+the Experimental Linked Increases Algorithm in
+[RFC 6356](https://www.rfc-editor.org/rfc/rfc6356.html). For active path `i`,
+the effective window is `cwnd_i`, limited to `ssthresh_i` during recovery and
+to `flight_i` while application limited. Paths with zero effective window do
+not participate. The acknowledged path MUST have a non-zero effective window.
+
+The reference path `max` maximizes `effective_i / rtt_i²`. With
+`alpha_scale = 512`, the sender computes using checked integer arithmetic:
+
+```text
+aggregate = sum(effective_i)
+normalized_sum = sum((rtt_max * effective_i) / rtt_i)
+alpha_scaled = 512 * aggregate * effective_max / normalized_sum²
+
+linked_growth = alpha_scaled * bytes_acked * MDS_i / (512 * aggregate)
+reno_growth = bytes_acked * MDS_i / effective_i
+```
+
+The two growth values are accumulated as path-local Q32 credits before taking
+whole bytes. For a congestion-avoidance ACK, actual window growth MUST NOT
+exceed either the ordinary CUBIC proposal or
+`min(linked_growth, reno_growth)`. The coupling cap does not apply during Slow
+Start or Conservative Slow Start. Invalid snapshots, duplicate path
+identifiers, exhausted fixed state, or arithmetic overflow MUST NOT increase a
+window. Retiring a path clears its fractional coupling credit.
+
+This is an experimental CUBIC/LIA profile, not LIA conformance: loss and ECN
+decreases retain CUBIC `beta = 0.7` rather than the Reno behavior assumed by
+RFC 6356. Shared-bottleneck fairness remains a release blocker. The complete
+implementation contract and required measurements are in
+[`MULTIPATH.md`](MULTIPATH.md).
 
 The per-path pacer stores one next-departure timestamp. For a datagram or UDP
 GSO batch of `bytes`, it computes the ceiling of:
@@ -626,5 +660,6 @@ and reject structurally invalid packet forms.
 - Bit-exact CREDIT, COMMIT, and RESUME values.
 - Persistent-congestion and ECN ancillary-data integration with the production
   event loop.
-- Coupled multipath congestion controller.
+- Physical shared-bottleneck fairness validation of the experimental
+  CUBIC/LIA controller.
 - Relay negotiation and behavior.

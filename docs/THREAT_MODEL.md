@@ -76,6 +76,7 @@ analysis resistance.
 | DATA RAM exhaustion | Credits, fixed pools, manifest bounds | Lower throughput under pressure |
 | Cryptographic CPU exhaustion | Cookie before PQ operations, batching, quotas | Authenticated malicious peer |
 | Path injection | Authenticated PATH_OFFER followed by challenge/response | Denial of service on the physical path |
+| Traffic shifting | Per-path validation plus coupled congestion-avoidance growth | An on-path attacker can still degrade one path and redirect encrypted traffic |
 | Downgrade | Version and suites signed into the transcript | Negotiation flaws still require audit |
 | Chunk substitution | AEAD plus authenticated object/offset plus Merkle tree | Hash collision considered infeasible |
 | Malicious relay | End-to-end encryption and replay protection | Timing metadata remains visible |
@@ -101,5 +102,6 @@ analysis resistance.
 - Differential tests between two independent implementations.
 - A formal handshake and key-update model, for example in Tamarin or ProVerif.
 - Analysis and enforcement of AEAD usage limits.
+- Shared-bottleneck fairness and traffic-shifting evaluation for coupled paths.
 - Independent cryptographic and systems audits.
 - A vulnerability reporting program and wire-version rotation strategy.

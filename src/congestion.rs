@@ -335,6 +335,50 @@ impl CubicController {
         now_micros: u64,
         rtt: RttEstimator,
     ) -> Result<(), CongestionError> {
+        self.on_packet_acknowledged_inner(
+            acknowledged_bytes,
+            packet_sent_at_micros,
+            now_micros,
+            rtt,
+            None,
+        )
+        .map(|_| ())
+    }
+
+    /// Releases acknowledged bytes with a LIA congestion-avoidance growth cap.
+    ///
+    /// The cap is ignored during standard and Conservative Slow Start. During
+    /// congestion avoidance, actual growth is the smaller of the CUBIC proposal
+    /// and `maximum_growth_bytes`. The returned value is the applied growth.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::on_packet_acknowledged`].
+    pub fn on_packet_acknowledged_coupled(
+        &mut self,
+        acknowledged_bytes: u32,
+        packet_sent_at_micros: u64,
+        now_micros: u64,
+        rtt: RttEstimator,
+        maximum_growth_bytes: u64,
+    ) -> Result<u64, CongestionError> {
+        self.on_packet_acknowledged_inner(
+            acknowledged_bytes,
+            packet_sent_at_micros,
+            now_micros,
+            rtt,
+            Some(maximum_growth_bytes),
+        )
+    }
+
+    fn on_packet_acknowledged_inner(
+        &mut self,
+        acknowledged_bytes: u32,
+        packet_sent_at_micros: u64,
+        now_micros: u64,
+        rtt: RttEstimator,
+        congestion_avoidance_growth_limit: Option<u64>,
+    ) -> Result<u64, CongestionError> {
         self.validate_event_time(packet_sent_at_micros, now_micros)?;
         let acknowledged = u64::from(acknowledged_bytes);
         if acknowledged == 0 || acknowledged > self.bytes_in_flight {
@@ -347,8 +391,9 @@ impl CubicController {
             .is_some_and(|recovery| packet_sent_at_micros <= recovery)
             || self.application_limited_since_micros.is_some()
         {
-            return Ok(());
+            return Ok(0);
         }
+        let window_before_ack = self.congestion_window;
         match self.phase() {
             CongestionPhase::SlowStart => {
                 self.congestion_window = self.congestion_window.saturating_add(acknowledged);
@@ -359,10 +404,15 @@ impl CubicController {
                     .saturating_add(acknowledged / HYSTART_CSS_GROWTH_DIVISOR);
             }
             CongestionPhase::CongestionAvoidance => {
-                self.grow_cubic(acknowledged, now_micros, rtt);
+                self.grow_cubic(
+                    acknowledged,
+                    now_micros,
+                    rtt,
+                    congestion_avoidance_growth_limit.unwrap_or(u64::MAX),
+                );
             }
         }
-        Ok(())
+        Ok(self.congestion_window.saturating_sub(window_before_ack))
     }
 
     /// Feeds one newly measured raw RTT sample to `HyStart++`.
@@ -575,7 +625,13 @@ impl CubicController {
         u64::from(self.config.max_datagram_size) * 2
     }
 
-    fn grow_cubic(&mut self, acknowledged: u64, now_micros: u64, rtt: RttEstimator) {
+    fn grow_cubic(
+        &mut self,
+        acknowledged: u64,
+        now_micros: u64,
+        rtt: RttEstimator,
+        growth_limit: u64,
+    ) {
         if self.epoch_started_at_micros.is_none() {
             self.epoch_started_at_micros = Some(now_micros);
             self.epoch_window = self.congestion_window;
@@ -591,7 +647,10 @@ impl CubicController {
         let cubic_after_rtt = self.cubic_window_at(elapsed.saturating_add(smoothed_rtt));
         let reno_window = fixed_to_u64(self.estimated_reno_window_fixed);
         if cubic_now < reno_window {
-            self.congestion_window = self.congestion_window.max(reno_window);
+            let proposed = reno_window.saturating_sub(self.congestion_window);
+            self.congestion_window = self
+                .congestion_window
+                .saturating_add(proposed.min(growth_limit));
             return;
         }
         let upper = self
@@ -606,7 +665,9 @@ impl CubicController {
         self.cubic_credit_fixed = self.cubic_credit_fixed.saturating_add(increment_fixed);
         let increment = fixed_to_u64(self.cubic_credit_fixed);
         self.cubic_credit_fixed &= FIXED_POINT_ONE - 1;
-        self.congestion_window = self.congestion_window.saturating_add(increment);
+        self.congestion_window = self
+            .congestion_window
+            .saturating_add(increment.min(growth_limit));
     }
 
     fn update_reno_estimate(&mut self, acknowledged: u64) {
@@ -900,6 +961,21 @@ mod tests {
     }
 
     #[test]
+    fn coupled_cap_does_not_change_slow_start() {
+        let mut controller = CubicController::new(CubicConfig::default());
+        controller
+            .on_packet_sent(1_200, false)
+            .expect("packet sends");
+
+        let growth = controller
+            .on_packet_acknowledged_coupled(1_200, 0, 100, sampled_rtt(100), 0)
+            .expect("slow-start ACK applies");
+
+        assert_eq!(growth, 1_200);
+        assert_eq!(controller.congestion_window(), 13_200);
+    }
+
+    #[test]
     fn one_loss_epoch_reduces_once_and_persistent_loss_collapses_window() {
         let mut controller = CubicController::new(CubicConfig::default());
         for _ in 0..10 {
@@ -970,6 +1046,27 @@ mod tests {
             .expect("CUBIC ACK applies");
         assert!(controller.congestion_window() >= 8_400);
         assert!(controller.congestion_window() <= 12_600);
+        assert_eq!(controller.phase(), CongestionPhase::CongestionAvoidance);
+    }
+
+    #[test]
+    fn coupled_ack_caps_cubic_congestion_avoidance_growth() {
+        let mut controller = CubicController::new(CubicConfig::default());
+        for _ in 0..10 {
+            controller
+                .on_packet_sent(1_200, false)
+                .expect("window permits");
+        }
+        controller
+            .on_packet_lost(1_200, 0, 10, false)
+            .expect("loss enters congestion avoidance");
+
+        let growth = controller
+            .on_packet_acknowledged_coupled(1_200, 11, 20, sampled_rtt(10_000), 10)
+            .expect("coupled ACK applies");
+
+        assert_eq!(growth, 10);
+        assert_eq!(controller.congestion_window(), 8_410);
         assert_eq!(controller.phase(), CongestionPhase::CongestionAvoidance);
     }
 

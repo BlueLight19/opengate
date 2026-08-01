@@ -12,6 +12,7 @@ pub mod ecn;
 pub mod flow;
 pub mod handshake;
 pub mod kdf;
+pub mod multipath;
 pub mod protection;
 pub mod recovery;
 #[cfg(any(test, feature = "simulator"))]

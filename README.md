@@ -31,6 +31,8 @@ The current `0.2` version is an early design and codec milestone:
   round tracking;
 - negotiated per-path ECN probing, authenticated cumulative feedback, strict
   validation, and loss-equivalent CUBIC response;
+- fixed-capacity linked-increases coupling for up to 16 concurrent paths, with
+  integer alpha calculation and a conservative CUBIC growth cap;
 - an opt-in deterministic multipath fault simulator.
 
 This code is not production-ready and must not yet protect sensitive data.
@@ -43,6 +45,7 @@ This code is not production-ready and must not yet protect sensitive data.
 - [`BENCHMARKS.md`](docs/BENCHMARKS.md) — RAM/CPU budgets and measurement plan;
 - [`CONGESTION.md`](docs/CONGESTION.md) — CUBIC, PTO, and pacing profile;
 - [`ECN.md`](docs/ECN.md) — ECN wire feedback and per-path validation;
+- [`MULTIPATH.md`](docs/MULTIPATH.md) — experimental coupled path control;
 - [`RECOVERY.md`](docs/RECOVERY.md) — bounded loss-recovery invariants;
 - [`SIMULATION.md`](docs/SIMULATION.md) — deterministic fault-model semantics.
 
@@ -56,6 +59,6 @@ cargo test --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-The next milestones are coupled multipath control, an audited cryptographic
-provider adapter, and a batched UDP runtime with ECN ancillary data plus
-measured allocation/copy budgets.
+The next milestones are physical shared-bottleneck validation, an audited
+cryptographic provider adapter, and a batched UDP runtime with ECN ancillary
+data plus measured allocation/copy budgets.

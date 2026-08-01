@@ -12,6 +12,8 @@ exit follows [RFC 9406](https://www.rfc-editor.org/rfc/rfc9406.html).
 ECN codepoints follow [RFC 3168](https://www.rfc-editor.org/rfc/rfc3168.html),
 with a validation strategy adapted from
 [RFC 9000](https://www.rfc-editor.org/rfc/rfc9000.html#section-13.4.2).
+Concurrent-path increase coupling is based on the Experimental LIA equations
+in [RFC 6356](https://www.rfc-editor.org/rfc/rfc6356.html).
 
 ## Congestion window
 
@@ -96,6 +98,22 @@ window. Reno-friendly growth remains available below the cubic estimate.
 Application-limited time is removed from the cubic epoch instead of being
 mistaken for network delay.
 
+## Coupled multipath growth
+
+Each path retains its independent CUBIC decrease, recovery, ECN, and pacing
+state. For congestion-avoidance ACKs, the fixed-capacity `LiaCoupler` computes
+a linked-increases budget from the effective windows and RTTs of at most 16
+active paths. The controller applies the smaller of its ordinary CUBIC growth
+proposal and that whole-byte budget. Slow Start and Conservative Slow Start
+are unchanged.
+
+Fractional LIA credit is Q32 and path-local; the alpha calculation uses checked
+`u128` integer arithmetic and fails closed on invalid or overflowing state.
+The full equations, lifecycle rules, and experimental limitations are in
+[`MULTIPATH.md`](MULTIPATH.md). In particular, CUBIC's 0.7 decrease differs
+from the Reno decrease assumed by RFC 6356, so this combination requires
+fairness measurements rather than inheriting LIA's evaluation claims.
+
 Confirmed persistent congestion collapses the window to two maximum-sized
 datagrams. The detector is deliberately separate from loss declaration: its
 caller must feed every ACK-eliciting packet outcome in non-decreasing send-time
@@ -133,8 +151,9 @@ The implementation still needs:
 - production wiring that forwards each recovery RTT sample to HyStart++ once;
 - kernel ancillary-data wiring and physical-path ECN bleaching tests;
 - comparisons of fixed-point CUBIC trajectories with a high-precision model;
-- kernel pacing, UDP GSO, CPU, allocation, and fairness measurements;
-- a coupled controller for paths that share a bottleneck.
+- kernel pacing, UDP GSO, CPU, and allocation measurements;
+- physical shared-bottleneck, RTT-bias, and fairness validation of the
+  experimental CUBIC/LIA profile.
 
 Until those items and the security blockers in `SPEC.md` are resolved, these
 algorithms are an experimental implementation profile, not a production claim.

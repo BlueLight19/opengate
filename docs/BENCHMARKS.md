@@ -103,6 +103,18 @@ Required measurements:
 - duplicated bytes;
 - accuracy of the estimated-arrival-time scheduler.
 
+Coupled-control runs additionally publish the active/effective path count,
+aggregate effective window, LIA `alpha_scaled`, reference path, per-ACK growth
+limit, actual CUBIC growth, and discarded budget. The shared-bottleneck matrix
+must compare coupled OGTP, uncoupled OGTP, one single-path CUBIC flow, and one
+current QUIC implementation. Reports include Jain's fairness index, queue
+delay, loss or CE rate, and goodput for both OGTP and competing traffic.
+
+The matrix covers 1, 2, 4, 8, and 16 paths; equal and asymmetric RTTs; equal
+and asymmetric datagram sizes; application-limited paths; path churn; and both
+shared and genuinely disjoint bottlenecks. CPU reports include cycles per ACK
+for the bounded `O(paths)` alpha calculation.
+
 Congestion-control reports additionally publish initial/steady-state `cwnd`,
 bytes-in-flight, HyStart++ round minima, CSS transitions, slow-start exit,
 CUBIC epoch transitions, PTO count, persistent congestion events, pacer queue
