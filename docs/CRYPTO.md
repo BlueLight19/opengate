@@ -299,6 +299,10 @@ Machine-readable draft vectors are stored in:
   identity fingerprinting, handshake signature input, and Finished HMAC;
 - [`kdf-sha384-v1.txt`](../test-vectors/kdf-sha384-v1.txt), covering the key
   schedule and per-path derivation;
+- [`encrypted-handshake-v1.txt`](../test-vectors/encrypted-handshake-v1.txt),
+  covering both handshake AEAD suites, identity signatures, every named
+  transcript milestone, Finished, exact ciphertext/wire digests, and
+  application secrets;
 - [`packet-protection-v1.txt`](../test-vectors/packet-protection-v1.txt),
   covering nonce formation, AEAD output, header-protection samples and masks,
   and complete protected packets for both cipher suites.
@@ -314,19 +318,23 @@ The KDF vectors were cross-checked using Python's standard HMAC/SHA-384
 implementation and `cryptography`'s independent HKDFExpand implementation. The
 packet vectors are continuously reproduced with independent RustCrypto AEAD,
 AES block-cipher, and ChaCha20 implementations in `tests/packet_vectors.rs`.
-The feature-gated mutual-handshake test additionally composes real randomized
-identity signatures and fresh hybrid KEM values through encrypted `RESPONSE`
-and `FINISH` messages for both suites. Because those operations intentionally
-consume operating-system randomness, this live test complements rather than
-replaces a future frozen cross-implementation vector.
+The feature-gated mutual-handshake test composes real randomized identity
+signatures and fresh hybrid KEM values through encrypted `RESPONSE` and
+`FINISH` messages for both suites. The frozen vector complements that live
+test with reproducible identity seeds, the FIPS 204 deterministic signing
+variant, deterministic X25519 private inputs, an ML-KEM key-generation seed and
+encapsulation randomness, the resulting real hybrid secret, and digest-
+addressed complete wire outputs. This supplies a stable selected-backend
+checkpoint but does not replace official standard vectors or reproduction by
+an independent implementation.
 
 ## 9. Release requirements
 
 Before production use, this schedule requires:
 
 - independent cryptographic review;
-- frozen encrypted-handshake vectors carrying real hybrid identity values for
-  independent cross-implementation consumption;
+- reproduction of the published encrypted-handshake vector by an independent
+  implementation;
 - independent audit or replacement of the feature-gated concrete provider,
   plus official X25519/ML-KEM-768 and ML-DSA-65 known-answer and differential
   coverage; real Ed25519/ML-DSA negative tests already run in the feature-gated

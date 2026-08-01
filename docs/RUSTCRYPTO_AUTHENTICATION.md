@@ -155,6 +155,15 @@ X25519/ML-KEM-768, real Ed25519/randomized ML-DSA-65 identities, independent
 transcript states, encrypted `RESPONSE` and `FINISH`, both trust checks, both
 Finished checks, and equal application-secret derivation.
 
+`tests/encrypted_handshake_vectors.rs` uses fixed identity seeds and the FIPS
+204 deterministic ML-DSA signing variant to reproduce
+`test-vectors/encrypted-handshake-v1.txt`. It verifies both real identities and
+combines them with deterministic, internally consistent X25519/ML-KEM-768
+agreement. It freezes every signature, Finished, plaintext, ciphertext, wire-
+message, transcript, and application-secret checkpoint for both suites. This
+deterministic test-only construction does not change the randomized production
+signing path.
+
 Run the concrete authentication suite with:
 
 ```sh
@@ -162,6 +171,8 @@ cargo test --features rustcrypto-provider \
   --test rustcrypto_authentication_provider
 cargo test --features rustcrypto-provider \
   --test rustcrypto_authenticated_handshake
+cargo test --features rustcrypto-provider \
+  --test encrypted_handshake_vectors
 ```
 
 ## Release blockers
@@ -173,9 +184,8 @@ Before sensitive deployment, this adapter still requires:
   with an equivalently tested audited or formally verified backend;
 - official FIPS 204 ML-DSA-65 known-answer vectors and differential tests
   against an independent implementation;
-- frozen encrypted `RESPONSE` and `FINISH` vectors for independent
-  cross-implementation consumption (the live randomized end-to-end path is
-  already tested);
+- reproduction of the frozen encrypted `RESPONSE` and `FINISH` vector by an
+  independent implementation;
 - target-specific signing and verification latency, peak-stack, timing, and
   side-channel measurements;
 - fault-injection tests for entropy failure, process fork, VM snapshot and

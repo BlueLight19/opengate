@@ -187,6 +187,9 @@ failure, and provider failures during both updates and snapshots. The concrete
 provider integration test additionally proves that independently maintained
 initiator and responder transcripts reach identical responder and initiator
 milestones through encrypted wire messages for both cipher suites.
+The frozen encrypted-handshake vector publishes the resulting `TH_pre_auth`,
+role-specific signature/Finished milestones, and `TH_full` for deterministic
+cross-implementation comparison.
 
 Production work still includes:
 
@@ -196,6 +199,6 @@ Production work still includes:
   capabilities;
 - lease/reassembly ownership and deadline wiring in the UDP runtime;
 - stateful fuzzing of fragmentation, rollback, and slot lifecycle;
-- encrypted-handshake interoperability vectors;
+- independent implementation consumption of the encrypted-handshake vector;
 - platform-verified secret erasure, crash-dump policy, and secure-key storage;
 - CPU and memory benchmarks under distributed valid-cookie traffic.

@@ -244,12 +244,24 @@ encrypted `RESPONSE`, and encrypted `FINISH`; verifies both real hybrid
 identities and Finished values; and proves equal application secrets at both
 peers for both suites.
 
+`test-vectors/encrypted-handshake-v1.txt` freezes the complete composition for
+independent consumers. Its reproducer derives matching X25519 secrets from
+published private inputs, performs ML-KEM key generation, deterministic
+encapsulation, and decapsulation from published seed/randomness, creates real
+deterministic Ed25519 and ML-DSA-65 signatures, and verifies both identities.
+It then seals both 5,405-byte authentication blocks with independently
+implemented HKDF/HMAC/AEAD test code and checks every published hash, MAC, key,
+IV, ciphertext boundary, complete wire digest, transcript milestone, and
+application secret for both suites. Official and independently reproduced
+ML-KEM/X25519 known-answer coverage remains a separate requirement.
+
 Production work still includes:
 
 - independent audit or replacement of the concrete X25519/ML-KEM-768 adapter;
 - complete official known-answer coverage for the selected ML-KEM backend;
 - audited secure-key storage and platform crash/swap/core-dump policy;
-- complete encrypted `RESPONSE` and `FINISH` interoperability vectors;
+- independent implementation consumption of the frozen encrypted `RESPONSE`
+  and `FINISH` vector;
 - stateful fuzzing across KEM failure, transcript rollback, AEAD failure, and
   capability installation;
 - compiler/platform verified zeroization and opaque-handle destruction;

@@ -44,6 +44,10 @@ The current `0.2` version is an early design and codec milestone:
 - provider-neutral in-place packet-protection orchestration with enforced AEAD
   usage limits;
 - reproducible AES-256-GCM and ChaCha20-Poly1305 packet vectors;
+- a frozen deterministic authenticated-handshake vector covering both suites,
+  real X25519/ML-KEM-768 agreement, transcript milestones, real
+  Ed25519/ML-DSA-65 identities, Finished, encrypted `RESPONSE`/`FINISH`, and
+  application-secret derivation;
 - fixed-capacity sent-packet recovery with integer RTT estimation, ACK-driven
   loss detection, and deterministic multipath reinjection selection;
 - bounded PTO and persistent-congestion state, byte-counted CUBIC, and a
@@ -97,6 +101,7 @@ opt-in:
 cargo test --features rustcrypto-provider --test rustcrypto_handshake_provider
 cargo test --features rustcrypto-provider --test rustcrypto_authentication_provider
 cargo test --features rustcrypto-provider --test rustcrypto_authenticated_handshake
+cargo test --features rustcrypto-provider --test encrypted_handshake_vectors
 ```
 
 All feature combinations and public cryptographic vectors are checked with:
@@ -107,7 +112,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 ```
 
 The next milestones are independent review or replacement of the concrete
-post-quantum provider, official ML-DSA/ML-KEM differential vectors, complete
-frozen encrypted-handshake vectors for cross-implementation testing, physical
-shared-bottleneck validation, and a batched UDP runtime with ECN ancillary data
-plus measured allocation/copy budgets.
+post-quantum provider, official ML-DSA/ML-KEM differential vectors, independent
+consumption of the published encrypted-handshake vector, physical shared-
+bottleneck validation, and a batched UDP runtime with ECN ancillary data plus
+measured allocation/copy budgets.

@@ -459,6 +459,10 @@ Its high-level sender path and integration test now compose fresh hybrid KEM,
 independent canonical transcripts, real dual identity signatures, Finished,
 encrypted `RESPONSE`/`FINISH`, mutual trust checks, and application-secret
 agreement for both cipher suites.
+The companion frozen vector in
+[`encrypted-handshake-v1.txt`](../test-vectors/encrypted-handshake-v1.txt)
+publishes deterministic checkpoints and digest-addressed complete wire outputs
+for both suites without changing the production entropy policy.
 It is an interoperability and review target, not a release qualification; its
 ML-KEM and ML-DSA dependencies currently declare no independent audit. See
 [`RUSTCRYPTO_PROVIDER.md`](RUSTCRYPTO_PROVIDER.md) and

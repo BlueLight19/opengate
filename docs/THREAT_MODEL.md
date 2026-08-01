@@ -117,6 +117,10 @@ analysis resistance.
   manifest binding, an RFC 8032 Ed25519 known-answer vector, and complete
   mutually authenticated encrypted `RESPONSE`/`FINISH` exchanges for both
   cipher suites with independent peer transcripts.
+- Independent reproduction of the frozen authenticated-handshake vector; the
+  repository already publishes and continuously reproduces both AEAD suites,
+  real deterministic hybrid identity signatures, Finished, complete encrypted
+  wire digests, transcript milestones, and application secrets.
 - Continuous fuzzing of codecs and the bounded handshake state; deterministic
   overlap, metadata-change, admission, pool-exhaustion, and transcript rollback
   tests already exist.

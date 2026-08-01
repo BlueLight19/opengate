@@ -34,6 +34,7 @@ Enable it explicitly:
 cargo test --features rustcrypto-provider --test rustcrypto_handshake_provider
 cargo test --features rustcrypto-provider --test rustcrypto_authentication_provider
 cargo test --features rustcrypto-provider --test rustcrypto_authenticated_handshake
+cargo test --features rustcrypto-provider --test encrypted_handshake_vectors
 ```
 
 The default build keeps the protocol orchestration provider-neutral and does
@@ -134,6 +135,15 @@ initiator identity ciphertexts through the role-checked sender API, opens and
 authenticates them on independent peer state, compares every transcript
 milestone, and derives equal directional application secrets.
 
+`tests/encrypted_handshake_vectors.rs` independently implements the test KDF,
+HMAC, and AEAD composition around fixed protocol codecs and transcript state.
+It also derives matching X25519 shared secrets and performs deterministic
+ML-KEM-768 key generation, encapsulation, and decapsulation from published
+test inputs. It reproduces the digest-addressed complete `RESPONSE` and
+`FINISH` outputs in `test-vectors/encrypted-handshake-v1.txt` for both suites.
+The vector uses deterministic FIPS 204 signing for reproducibility; the
+provider API tested above continues to use fresh operating-system randomness.
+
 ## Audit status and release blockers
 
 This adapter is concrete, but it is not described as audited. In particular,
@@ -152,5 +162,6 @@ Before sensitive deployment, OGTP still requires:
 - generated-code timing and side-channel evaluation on supported targets;
 - platform tests for entropy failure, fork/VM snapshot behavior, secret
   erasure, swap, crash dumps, and process termination;
-- frozen encrypted `RESPONSE` and `FINISH` interoperability vectors for an
-  independent implementation; the live in-repository mutual path is covered.
+- independent implementation reproduction of the frozen encrypted `RESPONSE`
+  and `FINISH` vector; both live and deterministic in-repository paths are
+  covered.

@@ -141,10 +141,14 @@ Ed25519 keys, malformed ML-DSA signatures, the RFC 8032 empty-message vector,
 entropy-backed key generation, fixed identity-memory bounds, and a complete
 mutually authenticated encrypted `RESPONSE`/`FINISH` exchange with independent
 peer transcripts and equal application secrets for both cipher suites.
+The frozen encrypted-handshake vector adds reproducible deterministic ML-DSA
+signatures, exact signature/plaintext/ciphertext digests, and every Finished
+input/output needed by an independent consumer. Production signing remains
+randomized.
 
 Production work still includes an audited ML-DSA provider or audited
 replacement, official FIPS 204 known-answer and differential vectors, full
-frozen encrypted-handshake interoperability vectors, UDP event-loop integration
-around the implemented transcript and sender state, platform key-erasure tests,
-stateful fuzzing, and cryptographic CPU/stack benchmarking under invalid
-authenticated traffic.
+independent consumption of the published encrypted-handshake vector, UDP event-
+loop integration around the implemented transcript and sender state, platform
+key-erasure tests, stateful fuzzing, and cryptographic CPU/stack benchmarking
+under invalid authenticated traffic.
