@@ -59,6 +59,9 @@ The current `0.2` version is an early design and codec milestone:
 - a safe nonblocking standard UDP adapter with direct fixed-slot receive,
   one-byte oversize detection, explicit capability reporting, monotonic TX
   pacing, IPv6 scope preservation, and exact buffer resolution on every path;
+- exact compile-time RX/TX batches with all-or-nothing reservation, safe
+  disjoint buffer borrowing, FIFO extraction, and per-element resolution of
+  partial kernel results without allocation or payload copies;
 - bounded PTO and persistent-congestion state, byte-counted CUBIC, and a
   nanosecond integer pacer for each path;
 - allocation-free HyStart++ with Conservative Slow Start and packet-number

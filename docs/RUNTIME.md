@@ -96,6 +96,33 @@ send-not-before timestamp, and an optional UDP GSO segment size. The socket
 adapter remains responsible for checking platform offload limits and falling
 back to individual datagrams without changing protocol semantics.
 
+## Fixed batch ownership
+
+Platform syscalls must borrow multiple pool slots without constructing an
+aliasing mutable slice or a heap-backed staging list. The core provides exact
+compile-time batches for that boundary.
+
+`ReceiveQueue::reserve_batch<N>` reserves all `N` slots or returns every slot
+acquired by that call. Resource counts are unchanged after failure. The
+returned `ReceiveBatchReservation<N>` exposes all payload areas at once through
+`batch_buffers_mut`; Rust's disjoint-index validation proves that no two slices
+alias. After the syscall, `into_reservations` restores the individual ownership
+tokens so each successful element can be committed and every unused or failed
+element can be cancelled independently.
+
+`TransmitQueue::pop_batch<N>` removes exactly `N` ready datagrams in FIFO order.
+If fewer are available, it returns `None` without popping any. A backend borrows
+each immutable view to build its syscall descriptors, then calls
+`into_datagrams` after the result. For a partial batch, accepted elements are
+completed or deferred, transiently blocked elements are requeued, and permanent
+local failures are discarded. A smaller compile-time batch or the ordinary
+single-datagram path handles the tail.
+
+Batch tokens are non-`Copy`, non-`Clone`, redacted in `Debug`, and marked
+`must_use`. The batch layer allocates no memory, performs no payload copy, and
+contains no unsafe code. It is shared by future `recvmmsg`/`sendmmsg` and
+`io_uring` adapters rather than duplicating ownership logic per platform.
+
 ## Safe standard-library adapter
 
 `PortableUdpSocket` owns one `std::net::UdpSocket`, assigns it a stable runtime
@@ -192,7 +219,10 @@ timer ordering, monotonic polling, capacity exhaustion, cancellation, and
 stale-token rejection after slot reuse. Local loopback tests additionally
 cover direct nonblocking receive, explicit unavailable metadata, oversize
 probing, buffer-capacity rejection, pacing, synchronous transmit, IPv6 scope
-preservation, and unsupported-offload cleanup.
+preservation, and unsupported-offload cleanup. Fixed-batch tests cover
+all-or-nothing RX rollback, simultaneous disjoint buffer writes, FIFO TX
+extraction, incomplete-batch immutability, and mixed synchronous, requeued,
+discarded, and deferred completion outcomes.
 
 The next runtime slices are:
 

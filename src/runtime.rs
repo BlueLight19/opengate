@@ -82,6 +82,51 @@ impl fmt::Debug for ReceiveReservation {
     }
 }
 
+/// Exact fixed-size set of receive reservations for one batched syscall.
+#[must_use = "a receive batch must be split and every reservation resolved"]
+pub struct ReceiveBatchReservation<const BATCH: usize> {
+    indices: [usize; BATCH],
+    generations: [u32; BATCH],
+}
+
+impl<const BATCH: usize> ReceiveBatchReservation<BATCH> {
+    /// Returns the compile-time number of reservations in this batch.
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        BATCH
+    }
+
+    /// Returns whether this is a zero-size batch.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        BATCH == 0
+    }
+
+    /// Splits the batch after a syscall so every slot can be committed or
+    /// cancelled independently.
+    #[must_use = "every returned reservation must be committed or cancelled"]
+    pub fn into_reservations(self) -> [ReceiveReservation; BATCH] {
+        let Self {
+            indices,
+            generations,
+        } = self;
+        core::array::from_fn(|position| ReceiveReservation {
+            index: indices[position],
+            generation: generations[position],
+        })
+    }
+}
+
+impl<const BATCH: usize> fmt::Debug for ReceiveBatchReservation<BATCH> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ReceiveBatchReservation")
+            .field("reservations", &BATCH)
+            .field("ownership", &"<redacted>")
+            .finish()
+    }
+}
+
 /// Completed receive-buffer ownership returned to the event loop.
 #[must_use = "a received datagram must be released"]
 pub struct ReceivedDatagram {
@@ -245,6 +290,45 @@ impl<const SLOTS: usize, const BUFFER_SIZE: usize> ReceiveQueue<SLOTS, BUFFER_SI
         Err(RuntimeQueueError::GenerationExhausted)
     }
 
+    /// Atomically reserves exactly `BATCH` buffers for one batched receive.
+    ///
+    /// A failure returns every reservation acquired by this call. Generations
+    /// may advance, but free/ready/owned counts are restored exactly.
+    ///
+    /// # Errors
+    ///
+    /// Returns pool or generation exhaustion without retaining a partial
+    /// batch.
+    pub fn reserve_batch<const BATCH: usize>(
+        &mut self,
+    ) -> Result<ReceiveBatchReservation<BATCH>, RuntimeQueueError> {
+        let mut indices = [0; BATCH];
+        let mut generations = [0; BATCH];
+        let mut acquired = 0;
+        for index in 0..BATCH {
+            match self.reserve() {
+                Ok(reservation) => {
+                    indices[index] = reservation.index;
+                    generations[index] = reservation.generation;
+                    acquired += 1;
+                }
+                Err(error) => {
+                    for position in 0..acquired {
+                        self.release_unwritten_receive_reservation(ReceiveReservation {
+                            index: indices[position],
+                            generation: generations[position],
+                        })?;
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        Ok(ReceiveBatchReservation {
+            indices,
+            generations,
+        })
+    }
+
     /// Returns the complete stable buffer for one outstanding receive.
     ///
     /// # Errors
@@ -260,6 +344,33 @@ impl<const SLOTS: usize, const BUFFER_SIZE: usize> ReceiveQueue<SLOTS, BUFFER_SI
             ReceiveState::Reserved,
         )?;
         Ok(&mut slot.bytes)
+    }
+
+    /// Borrows every batch buffer simultaneously as disjoint mutable slices.
+    ///
+    /// This is the safe scatter/gather boundary for `recvmmsg`, multishot
+    /// receive, and equivalent platform APIs.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidOwnership` for stale or wrong-state reservations, or
+    /// `InvariantViolation` if a supposedly exact batch aliases a slot.
+    pub fn batch_buffers_mut<'a, const BATCH: usize>(
+        &'a mut self,
+        batch: &ReceiveBatchReservation<BATCH>,
+    ) -> Result<[&'a mut [u8]; BATCH], RuntimeQueueError> {
+        for position in 0..BATCH {
+            self.receive_slot(
+                batch.indices[position],
+                batch.generations[position],
+                ReceiveState::Reserved,
+            )?;
+        }
+        let slots = self
+            .slots
+            .get_disjoint_mut(batch.indices)
+            .map_err(|_| RuntimeQueueError::InvariantViolation)?;
+        Ok(slots.map(|slot| &mut slot.bytes[..]))
     }
 
     /// Commits the bytes and ancillary metadata produced by one receive.
@@ -500,6 +611,48 @@ impl fmt::Debug for TransmitDatagram {
     }
 }
 
+/// Exact fixed-size set of ready datagrams for one batched submission.
+#[must_use = "a transmit batch must be split and every datagram resolved"]
+pub struct TransmitBatch<const BATCH: usize> {
+    datagrams: [TransmitDatagram; BATCH],
+}
+
+impl<const BATCH: usize> TransmitBatch<BATCH> {
+    /// Returns the compile-time number of datagrams in this batch.
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        BATCH
+    }
+
+    /// Returns whether this is a zero-size batch.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        BATCH == 0
+    }
+
+    /// Borrows the submission tokens for zero-copy view construction.
+    pub const fn datagrams(&self) -> &[TransmitDatagram; BATCH] {
+        &self.datagrams
+    }
+
+    /// Splits the batch after a syscall so each accepted or unsubmitted
+    /// datagram can be completed, deferred, discarded, or requeued.
+    #[must_use = "every returned datagram must be completed, deferred, discarded, or requeued"]
+    pub fn into_datagrams(self) -> [TransmitDatagram; BATCH] {
+        self.datagrams
+    }
+}
+
+impl<const BATCH: usize> fmt::Debug for TransmitBatch<BATCH> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TransmitBatch")
+            .field("datagrams", &BATCH)
+            .field("ownership", &"<redacted>")
+            .finish()
+    }
+}
+
 /// Stable tag retained until the kernel releases a zero-copy transmit buffer.
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 #[must_use = "a kernel-owned transmit tag must be completed"]
@@ -687,6 +840,27 @@ impl<const SLOTS: usize, const BUFFER_SIZE: usize> TransmitQueue<SLOTS, BUFFER_S
         Some(TransmitDatagram {
             index,
             generation: slot.generation,
+        })
+    }
+
+    /// Pops exactly `BATCH` datagrams in ready-queue order.
+    ///
+    /// If fewer are ready, this returns `None` without changing the queue.
+    /// Callers may use a smaller compile-time batch or the single-datagram
+    /// `pop` path for the tail.
+    #[must_use]
+    pub fn pop_batch<const BATCH: usize>(&mut self) -> Option<TransmitBatch<BATCH>> {
+        let indices = self.ready.pop_exact::<BATCH>()?;
+        Some(TransmitBatch {
+            datagrams: indices.map(|index| {
+                let slot = &mut self.slots[index];
+                debug_assert_eq!(slot.state, TransmitState::Ready);
+                slot.state = TransmitState::Submitting;
+                TransmitDatagram {
+                    index,
+                    generation: slot.generation,
+                }
+            }),
         })
     }
 
@@ -1326,6 +1500,21 @@ impl<const CAPACITY: usize> IndexQueue<CAPACITY> {
         Some(value)
     }
 
+    fn pop_exact<const COUNT: usize>(&mut self) -> Option<[usize; COUNT]> {
+        if self.length < COUNT {
+            return None;
+        }
+        let mut values = [0; COUNT];
+        for (offset, value) in values.iter_mut().enumerate() {
+            *value = self.entries[(self.head + offset) % CAPACITY];
+        }
+        if COUNT != 0 {
+            self.head = (self.head + COUNT) % CAPACITY;
+        }
+        self.length -= COUNT;
+        Some(values)
+    }
+
     const fn len(&self) -> usize {
         self.length
     }
@@ -1454,6 +1643,56 @@ mod tests {
     }
 
     #[test]
+    fn receive_batch_borrows_disjoint_buffers_and_rolls_back_partial_reservation() {
+        let mut queue = ReceiveQueue::<3, 8>::new();
+        let batch = queue.reserve_batch::<3>().expect("complete receive batch");
+        assert_eq!(batch.len(), 3);
+        assert!(!batch.is_empty());
+        {
+            let [first, second, third] = queue
+                .batch_buffers_mut(&batch)
+                .expect("disjoint receive buffers");
+            first[0] = b'A';
+            second[..2].copy_from_slice(b"BC");
+            third[..3].copy_from_slice(b"DEF");
+        }
+        let [first, second, third] = batch.into_reservations();
+        queue
+            .commit(first, 1, receive_metadata(None))
+            .expect("first commit");
+        queue
+            .commit(second, 2, receive_metadata(None))
+            .expect("second commit");
+        queue
+            .commit(third, 3, receive_metadata(None))
+            .expect("third commit");
+        for expected in [&b"A"[..], &b"BC"[..], &b"DEF"[..]] {
+            let datagram = queue.pop().expect("ordered batch result");
+            assert_eq!(queue.view(&datagram).expect("view").payload(), expected);
+            queue.release(datagram).expect("release");
+        }
+
+        assert_eq!(
+            queue.reserve_batch::<4>().expect_err("batch is too large"),
+            RuntimeQueueError::PoolExhausted
+        );
+        assert_eq!(queue.stats().free, 3);
+        let batch = queue
+            .reserve_batch::<3>()
+            .expect("rollback returned every slot");
+        assert!(
+            queue
+                .batch_buffers_mut(&batch)
+                .expect("rolled-back buffers")
+                .iter()
+                .all(|buffer| buffer.iter().all(|byte| *byte == 0))
+        );
+        for reservation in batch.into_reservations() {
+            queue.cancel(reservation).expect("cancel batch tail");
+        }
+    }
+
+    #[test]
     fn transmit_backpressure_and_kernel_completion_preserve_ownership() {
         let mut queue = TransmitQueue::<1, 16>::new();
         let reservation = queue.reserve().expect("reservation");
@@ -1525,6 +1764,53 @@ mod tests {
                 .all(|byte| *byte == 0)
         );
         queue.cancel(reused).expect("cancel");
+    }
+
+    #[test]
+    fn transmit_batch_preserves_order_and_supports_partial_outcomes() {
+        let mut queue = TransmitQueue::<3, 8>::new();
+        for payload in [&b"A"[..], &b"BC"[..], &b"DEF"[..]] {
+            let reservation = queue.reserve().expect("reservation");
+            queue.buffer_mut(&reservation).expect("buffer")[..payload.len()]
+                .copy_from_slice(payload);
+            queue
+                .commit(reservation, payload.len(), transmit_metadata(None))
+                .expect("commit");
+        }
+        assert!(queue.pop_batch::<4>().is_none());
+        assert_eq!(queue.stats().ready, 3);
+
+        let batch = queue.pop_batch::<3>().expect("complete transmit batch");
+        assert_eq!(batch.len(), 3);
+        assert!(!batch.is_empty());
+        let lengths = batch
+            .datagrams()
+            .iter()
+            .map(|datagram| queue.view(datagram).expect("batch view").payload().len())
+            .collect::<Vec<_>>();
+        assert_eq!(lengths, vec![1, 2, 3]);
+
+        let [accepted, blocked, deferred] = batch.into_datagrams();
+        queue.complete(accepted).expect("accepted by kernel");
+        queue
+            .requeue(blocked)
+            .expect("unsubmitted after partial send");
+        let tag = queue
+            .defer_completion(deferred)
+            .expect("asynchronous completion");
+        assert_eq!(queue.stats().free, 1);
+        assert_eq!(queue.stats().ready, 1);
+        assert_eq!(queue.stats().kernel_owned, 1);
+
+        let blocked = queue.pop().expect("requeued datagram");
+        assert_eq!(queue.view(&blocked).expect("blocked view").payload(), b"BC");
+        queue.discard(blocked).expect("discard failed retry");
+        queue.complete_deferred(tag).expect("kernel completion");
+        assert_eq!(queue.stats().free, 3);
+
+        let empty = queue.pop_batch::<0>().expect("zero batch");
+        assert!(empty.is_empty());
+        assert!(empty.datagrams().is_empty());
     }
 
     #[test]
