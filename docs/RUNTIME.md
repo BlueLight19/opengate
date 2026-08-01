@@ -1,11 +1,12 @@
 # OGTP/1 Bounded UDP Runtime Core
 
-Status: **draft 0.3 portable runtime contract; no socket adapter yet**.
+Status: **draft 0.3 portable runtime and standard UDP adapter contract**.
 
 This document defines the fixed-capacity boundary between OGTP protocol state
-and a UDP socket implementation. The Rust implementation is in
-`src/runtime.rs`. It performs no system calls, owns no socket, starts no task,
-and allocates no heap memory internally.
+and a UDP socket implementation. The fixed-resource implementation is in
+`src/runtime.rs`; the safe standard-library adapter is in
+`src/runtime/portable.rs`. The core performs no system calls, owns no socket,
+starts no task, and allocates no heap memory internally.
 
 The intended deployment model gives each connection shard to one event-loop
 owner. Platform adapters borrow buffers from this module and return explicit
@@ -50,7 +51,7 @@ Receive slots follow this state machine:
 
 ```text
 Free -> Reserved -> Ready -> Delivered -> Free
-          |                              
+          |
           +-------------------------> Free (cancel or invalid commit)
 ```
 
@@ -83,16 +84,51 @@ lengths and redacts endpoints, payloads, deadlines, and ownership identifiers.
 segment sizes larger than the committed length. These failures release and
 clear the reservation transactionally.
 
-Receive metadata retains source and destination endpoints, socket and
-interface identifiers, ECN, a monotonic receive timestamp, and an optional UDP
-GRO segment size. `ReceivedDatagramView::segments` returns the original
-datagrams in order without allocating or copying; the final segment may be
-shorter.
+Receive metadata retains the source endpoint, socket identifier, monotonic
+receive timestamp, and an optional UDP GRO segment size. Exact destination,
+interface, and ECN observations use `Option`; an adapter must return `None`
+rather than inventing ancillary data it could not observe.
+`ReceivedDatagramView::segments` returns the original datagrams in order
+without allocating or copying; the final segment may be shorter.
 
 Transmit metadata retains the corresponding routing fields, ECN, an absolute
 send-not-before timestamp, and an optional UDP GSO segment size. The socket
 adapter remains responsible for checking platform offload limits and falling
 back to individual datagrams without changing protocol semantics.
+
+## Safe standard-library adapter
+
+`PortableUdpSocket` owns one `std::net::UdpSocket`, assigns it a stable runtime
+socket ID, and forces nonblocking mode. It is a compatibility and integration
+backend, not the final high-throughput Linux path. It is `Send` but deliberately
+not `Sync`: ownership may move to an event-loop thread, while the fast path
+cannot share the adapter concurrently or acquire an implicit internal lock.
+
+Receive operations reserve a queue slot before calling `recv_from` and write
+directly into that slot. The configured OGTP maximum requires one additional
+buffer byte. This probe byte distinguishes an exact maximum-size datagram from
+an oversized datagram truncated to the supplied slice; the oversized prefix is
+cleared and never committed. The portable profile rejects maxima above 65,527
+bytes and excludes IPv6 jumbograms.
+
+The adapter records `None` for destination, interface, and ECN values that the
+standard library cannot observe. A concrete non-wildcard bind supplies the
+exact local destination; a wildcard bind does not. Callers query a compact
+capability set before enabling ECN or any offload-dependent behavior.
+
+Transmit operations enforce the socket ID and caller-supplied monotonic pacing
+deadline. The adapter accepts normal route selection, or a source equal to its
+concrete bound endpoint. It rejects per-datagram source/interface selection,
+ECN marking, and GSO when they require unavailable ancillary APIs. A pacing
+delay or `WouldBlock` requeues the token. Successful standard sends complete
+synchronously. Unsupported metadata and permanent socket errors discard the
+encoded bytes while leaving protocol recovery state responsible for reliable
+rescheduling.
+
+The standard backend performs one syscall per attempt and reports batching,
+GRO/GSO, kernel timestamps, ECN, and deferred completion as unsupported. Those
+features belong to capability-gated platform backends; they must retain the
+same ownership outcomes.
 
 ## Backpressure and kernel completion
 
@@ -153,12 +189,15 @@ Deterministic tests cover fixed pool exhaustion, FIFO delivery, GRO splitting,
 invalid shape rollback, zeroing on reuse, synchronous completion, transient TX
 requeue, deferred kernel ownership, duplicate completion rejection, stable
 timer ordering, monotonic polling, capacity exhaustion, cancellation, and
-stale-token rejection after slot reuse.
+stale-token rejection after slot reuse. Local loopback tests additionally
+cover direct nonblocking receive, explicit unavailable metadata, oversize
+probing, buffer-capacity rejection, pacing, synchronous transmit, IPv6 scope
+preservation, and unsupported-offload cleanup.
 
 The next runtime slices are:
 
-1. a portable nonblocking UDP adapter with ancillary address, interface, ECN,
-   and timestamp extraction plus batched `recvmmsg`/`sendmmsg` where available;
+1. a platform socket adapter with destination/interface/ECN/timestamp ancillary
+   extraction plus batched `recvmmsg`/`sendmmsg` where available;
 2. fixed connection/DCID ownership and bounded cross-thread completion rings;
 3. a Linux `io_uring` backend with registered buffers and capability-gated
    multishot receive, UDP GRO/GSO, and zero-copy completion handling;
@@ -167,7 +206,7 @@ The next runtime slices are:
 5. stateful fuzzing of adapter errors, partial batches, completion reordering,
    and resource exhaustion.
 
-This core does not make the runtime production-ready. Platform adapters,
-kernel capability detection, cancellation races, descriptor lifecycle,
-cross-platform conformance, and independent security review remain release
-blockers.
+This runtime does not make OGTP production-ready. Full ancillary-data support,
+batched platform adapters, kernel capability detection, cancellation races,
+descriptor lifecycle, cross-platform conformance, and independent security
+review remain release blockers.

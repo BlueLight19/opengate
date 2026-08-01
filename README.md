@@ -56,6 +56,9 @@ The current `0.2` version is an early design and codec milestone:
 - a stable fixed-capacity monotonic timer heap with typed owners, cancellation
   generations, deterministic equal-deadline ordering, and stale-token
   rejection;
+- a safe nonblocking standard UDP adapter with direct fixed-slot receive,
+  one-byte oversize detection, explicit capability reporting, monotonic TX
+  pacing, IPv6 scope preservation, and exact buffer resolution on every path;
 - bounded PTO and persistent-congestion state, byte-counted CUBIC, and a
   nanosecond integer pacer for each path;
 - allocation-free HyStart++ with Conservative Slow Start and packet-number
@@ -122,6 +125,6 @@ cargo clippy --all-targets --all-features -- -D warnings
 The next milestones are independent review or replacement of the concrete
 post-quantum provider, official ML-DSA/ML-KEM differential vectors, independent
 consumption of the published encrypted-handshake vector, physical shared-
-bottleneck validation, a portable nonblocking UDP socket adapter with ancillary
-metadata and batching, a capability-gated Linux `io_uring` backend, and
-measured allocation/copy budgets.
+bottleneck validation, a batched platform UDP adapter with destination,
+interface, ECN, and timestamp ancillary data, a capability-gated Linux
+`io_uring` backend, and measured allocation/copy budgets.

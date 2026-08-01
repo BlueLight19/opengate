@@ -766,8 +766,10 @@ remain under congestion control.
 
 The platform-neutral fixed buffer queues, explicit synchronous/asynchronous TX
 ownership, GRO/GSO metadata, and bounded monotonic timer heap are implemented
-as described in [`RUNTIME.md`](RUNTIME.md). Socket syscalls and Linux-specific
-capability negotiation remain outside that core.
+as described in [`RUNTIME.md`](RUNTIME.md). A safe nonblocking standard-library
+socket adapter provides the portable fallback with explicit capability gaps.
+Linux ancillary data, batched syscalls, and capability negotiation remain
+outside that adapter.
 
 The recommended profile is a userspace engine:
 

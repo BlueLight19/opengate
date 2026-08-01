@@ -4,6 +4,8 @@
 //! bounded buffer queues, kernel-completion ownership, endpoint metadata, and
 //! monotonic timer queue needed by portable and platform-specific adapters.
 
+pub mod portable;
+
 use core::fmt;
 use core::num::NonZeroU16;
 use zeroize::Zeroize;
@@ -22,16 +24,21 @@ pub enum IpAddress {
 pub struct UdpEndpoint {
     pub address: IpAddress,
     pub port: u16,
+    /// IPv6 scope identifier. This must be zero for IPv4.
+    pub scope_id: u32,
 }
 
 /// Ancillary metadata attached to one received UDP buffer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ReceiveMetadata {
     pub source: UdpEndpoint,
-    pub destination: UdpEndpoint,
+    /// Exact local destination, or `None` when ancillary data is unavailable.
+    pub destination: Option<UdpEndpoint>,
     pub socket_id: u16,
-    pub interface_index: u32,
-    pub ecn: EcnCodepoint,
+    /// Receiving interface, or `None` when ancillary data is unavailable.
+    pub interface_index: Option<u32>,
+    /// Received IP ECN field, or `None` when it was not observed.
+    pub ecn: Option<EcnCodepoint>,
     pub received_at_micros: u64,
     /// UDP GRO segment size. `None` means the buffer contains one datagram.
     pub gro_segment_size: Option<NonZeroU16>,
@@ -40,10 +47,12 @@ pub struct ReceiveMetadata {
 /// Routing and ancillary metadata for one outgoing UDP buffer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TransmitMetadata {
-    pub source: UdpEndpoint,
+    /// Requested local source, or `None` to use the socket-selected source.
+    pub source: Option<UdpEndpoint>,
     pub destination: UdpEndpoint,
     pub socket_id: u16,
-    pub interface_index: u32,
+    /// Requested outgoing interface, or `None` for normal route selection.
+    pub interface_index: Option<u32>,
     pub ecn: EcnCodepoint,
     pub send_not_before_micros: u64,
     /// UDP GSO segment size. `None` submits one datagram.
@@ -371,6 +380,25 @@ impl<const SLOTS: usize, const BUFFER_SIZE: usize> ReceiveQueue<SLOTS, BUFFER_SI
         Ok(())
     }
 
+    #[allow(clippy::needless_pass_by_value)] // The socket proved that it wrote no bytes.
+    fn release_unwritten_receive_reservation(
+        &mut self,
+        reservation: ReceiveReservation,
+    ) -> Result<(), RuntimeQueueError> {
+        self.receive_slot(
+            reservation.index,
+            reservation.generation,
+            ReceiveState::Reserved,
+        )?;
+        let slot = &mut self.slots[reservation.index];
+        debug_assert_eq!(slot.length, 0);
+        debug_assert!(slot.metadata.is_none());
+        slot.state = ReceiveState::Free;
+        let restored = self.free.push(reservation.index);
+        debug_assert!(restored);
+        Ok(())
+    }
+
     fn receive_slot(
         &self,
         index: usize,
@@ -690,6 +718,25 @@ impl<const SLOTS: usize, const BUFFER_SIZE: usize> TransmitQueue<SLOTS, BUFFER_S
     /// Returns `InvalidOwnership` for a stale or wrong-state token.
     #[allow(clippy::needless_pass_by_value)] // Consuming the token enforces single ownership.
     pub fn complete(&mut self, datagram: TransmitDatagram) -> Result<(), RuntimeQueueError> {
+        self.transmit_slot(
+            datagram.index,
+            datagram.generation,
+            TransmitState::Submitting,
+        )?;
+        self.clear_transmit_slot(datagram.index, false);
+        Ok(())
+    }
+
+    /// Discards a submission rejected before the kernel accepted its bytes.
+    ///
+    /// Recovery state remains responsible for rescheduling any reliable data
+    /// represented by this datagram.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidOwnership` for a stale or wrong-state token.
+    #[allow(clippy::needless_pass_by_value)] // Consuming the token enforces single ownership.
+    pub fn discard(&mut self, datagram: TransmitDatagram) -> Result<(), RuntimeQueueError> {
         self.transmit_slot(
             datagram.index,
             datagram.generation,
@@ -1317,16 +1364,17 @@ mod tests {
         UdpEndpoint {
             address: IpAddress::V4([192, 0, 2, last]),
             port,
+            scope_id: 0,
         }
     }
 
     fn receive_metadata(segment_size: Option<u16>) -> ReceiveMetadata {
         ReceiveMetadata {
             source: endpoint(1, 44_000),
-            destination: endpoint(2, 44_001),
+            destination: Some(endpoint(2, 44_001)),
             socket_id: 3,
-            interface_index: 4,
-            ecn: EcnCodepoint::Ect0,
+            interface_index: Some(4),
+            ecn: Some(EcnCodepoint::Ect0),
             received_at_micros: 5,
             gro_segment_size: segment_size.and_then(NonZeroU16::new),
         }
@@ -1334,10 +1382,10 @@ mod tests {
 
     fn transmit_metadata(segment_size: Option<u16>) -> TransmitMetadata {
         TransmitMetadata {
-            source: endpoint(2, 44_001),
+            source: Some(endpoint(2, 44_001)),
             destination: endpoint(1, 44_000),
             socket_id: 3,
-            interface_index: 4,
+            interface_index: Some(4),
             ecn: EcnCodepoint::Ect0,
             send_not_before_micros: 6,
             gso_segment_size: segment_size.and_then(NonZeroU16::new),
