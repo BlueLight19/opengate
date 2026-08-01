@@ -131,6 +131,22 @@ The state returns the exact named hashes required by `CRYPTO.md`:
   hash;
 - `record_initiator_auth`: initiator Finished hash and `TH_full`.
 
+Senders cannot append a complete `IdentityAuth` atomically because its Finished
+value depends on the transcript after the signed identity content but before
+the Finished record. `prepare_responder_auth` and `prepare_initiator_auth`
+therefore fork the live hash, append only the fixed 5,357-byte signed content,
+and return a mutable-borrow capability containing the role-correct signature
+and Finished hashes. `commit` appends the exact 48-byte Finished value and
+advances the live transcript. Dropping the capability, a provider failure, or
+a commit snapshot failure leaves the original stage and hash unchanged.
+
+`pending_responder_signature_hash` and `pending_initiator_signature_hash`
+expose a signature hash only at the matching sender stage. This prevents the
+concrete signing wrapper from accepting a caller-selected role or transcript
+milestone. Receiver-side `record_responder_auth` and `record_initiator_auth`
+use the same prepare/commit machinery after decoding the complete authenticated
+plaintext.
+
 Hash-bearing result values and transcript `Debug` output are redacted.
 
 Authentication plaintext must be supplied only after successful AEAD opening.
@@ -166,7 +182,11 @@ Deterministic tests cover stateless decoding, pre-allocation cookie extraction,
 out-of-order completion, duplicate fragments, conflicting overlaps, metadata
 changes, admission errors, invalid manually constructed packet bounds,
 Connection ID limits, pool exhaustion, independent transcript reproduction,
-negotiation failures, and provider failures during both updates and snapshots.
+negotiation failures, sender-preparation rollback on drop, commit snapshot
+failure, and provider failures during both updates and snapshots. The concrete
+provider integration test additionally proves that independently maintained
+initiator and responder transcripts reach identical responder and initiator
+milestones through encrypted wire messages for both cipher suites.
 
 Production work still includes:
 

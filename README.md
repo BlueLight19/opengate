@@ -38,7 +38,8 @@ The current `0.2` version is an early design and codec milestone:
 - an opt-in concrete `RustCrypto` handshake and identity provider with
   operating-system entropy, compiler-resistant secret zeroization, real
   X25519 + ML-KEM-768 exchange, strict Ed25519 + randomized ML-DSA-65
-  authentication, dual-signed manifests, and both negotiated AEAD suites;
+  authentication, dual-signed manifests, both negotiated AEAD suites, and a
+  complete mutually authenticated encrypted `RESPONSE`/`FINISH` path;
 - canonical handshake, transcript, and HKDF serializers;
 - provider-neutral in-place packet-protection orchestration with enforced AEAD
   usage limits;
@@ -95,6 +96,7 @@ opt-in:
 ```sh
 cargo test --features rustcrypto-provider --test rustcrypto_handshake_provider
 cargo test --features rustcrypto-provider --test rustcrypto_authentication_provider
+cargo test --features rustcrypto-provider --test rustcrypto_authenticated_handshake
 ```
 
 All feature combinations and public cryptographic vectors are checked with:
@@ -106,6 +108,6 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 The next milestones are independent review or replacement of the concrete
 post-quantum provider, official ML-DSA/ML-KEM differential vectors, complete
-encrypted-handshake vectors with real identities, physical shared-bottleneck
-validation, and a batched UDP runtime with ECN ancillary data plus measured
-allocation/copy budgets.
+frozen encrypted-handshake vectors for cross-implementation testing, physical
+shared-bottleneck validation, and a batched UDP runtime with ECN ancillary data
+plus measured allocation/copy budgets.

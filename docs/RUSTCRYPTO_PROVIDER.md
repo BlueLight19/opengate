@@ -33,6 +33,7 @@ Enable it explicitly:
 ```sh
 cargo test --features rustcrypto-provider --test rustcrypto_handshake_provider
 cargo test --features rustcrypto-provider --test rustcrypto_authentication_provider
+cargo test --features rustcrypto-provider --test rustcrypto_authenticated_handshake
 ```
 
 The default build keeps the protocol orchestration provider-neutral and does
@@ -126,6 +127,13 @@ fixed identity-memory bounds. See
 [`RUSTCRYPTO_AUTHENTICATION.md`](RUSTCRYPTO_AUTHENTICATION.md) for the exact
 authentication validation and remaining blockers.
 
+`tests/rustcrypto_authenticated_handshake.rs` composes the complete concrete
+path rather than testing the boundaries separately. For both negotiated AEAD
+suites it performs a fresh hybrid exchange, constructs real responder and
+initiator identity ciphertexts through the role-checked sender API, opens and
+authenticates them on independent peer state, compares every transcript
+milestone, and derives equal directional application secrets.
+
 ## Audit status and release blockers
 
 This adapter is concrete, but it is not described as audited. In particular,
@@ -144,4 +152,5 @@ Before sensitive deployment, OGTP still requires:
 - generated-code timing and side-channel evaluation on supported targets;
 - platform tests for entropy failure, fork/VM snapshot behavior, secret
   erasure, swap, crash dumps, and process termination;
-- complete encrypted `RESPONSE` and `FINISH` interoperability vectors.
+- frozen encrypted `RESPONSE` and `FINISH` interoperability vectors for an
+  independent implementation; the live in-repository mutual path is covered.

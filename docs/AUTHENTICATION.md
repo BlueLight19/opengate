@@ -138,11 +138,13 @@ redaction.
 The feature-gated concrete tests additionally cover real hybrid handshake and
 manifest signatures, independent Finished/Ed25519/ML-DSA tampering, weak
 Ed25519 keys, malformed ML-DSA signatures, the RFC 8032 empty-message vector,
-entropy-backed key generation, and fixed identity-memory bounds.
+entropy-backed key generation, fixed identity-memory bounds, and a complete
+mutually authenticated encrypted `RESPONSE`/`FINISH` exchange with independent
+peer transcripts and equal application secrets for both cipher suites.
 
 Production work still includes an audited ML-DSA provider or audited
 replacement, official FIPS 204 known-answer and differential vectors, full
-encrypted-handshake vectors with real identities, AEAD/runtime integration
-around the implemented transcript state, platform key-erasure tests, stateful
-fuzzing, and cryptographic CPU/stack benchmarking under invalid authenticated
-traffic.
+frozen encrypted-handshake interoperability vectors, UDP event-loop integration
+around the implemented transcript and sender state, platform key-erasure tests,
+stateful fuzzing, and cryptographic CPU/stack benchmarking under invalid
+authenticated traffic.

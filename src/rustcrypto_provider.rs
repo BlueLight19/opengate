@@ -40,15 +40,23 @@ use crate::authentication::{
 };
 use crate::crypto::{ForkableSha384Provider, SHA384_OUTPUT_LEN, Sha384Digest, Sha384Provider};
 use crate::handshake::{
-    CipherSuite, ED25519_PUBLIC_KEY_LEN, ED25519_SIGNATURE_LEN, FINISHED_MAC_LEN,
-    IDENTITY_FINGERPRINT_LEN, ML_DSA_65_PUBLIC_KEY_LEN, ML_DSA_65_SIGNATURE_LEN,
-    ML_KEM_768_CIPHERTEXT_LEN, ML_KEM_768_ENCAPSULATION_KEY_LEN, ML_KEM_SHARED_SECRET_LEN,
-    X25519_PUBLIC_KEY_LEN, X25519_SHARED_SECRET_LEN,
+    CipherSuite, ED25519_PUBLIC_KEY_LEN, ED25519_SIGNATURE_LEN, ENCRYPTED_IDENTITY_AUTH_LEN,
+    FINISHED_MAC_LEN, IDENTITY_FINGERPRINT_LEN, IdentityAuth, IdentityAuthContent,
+    ML_DSA_65_PUBLIC_KEY_LEN, ML_DSA_65_SIGNATURE_LEN, ML_KEM_768_CIPHERTEXT_LEN,
+    ML_KEM_768_ENCAPSULATION_KEY_LEN, ML_KEM_SHARED_SECRET_LEN, X25519_PUBLIC_KEY_LEN,
+    X25519_SHARED_SECRET_LEN,
 };
-use crate::handshake_crypto::{HandshakeAeadOpenResult, HandshakeCryptoProvider};
+use crate::handshake_crypto::{
+    HandshakeAeadOpenResult, HandshakeCryptoError, HandshakeCryptoProvider, HandshakeSecrets,
+    seal_initiator_identity_auth, seal_responder_identity_auth,
+};
+use crate::handshake_state::{
+    HandshakeTranscript, HandshakeTranscriptError, InitiatorTranscriptMilestone,
+    ResponderTranscriptMilestone,
+};
 use crate::kdf::{AEAD_IV_LEN, AEAD_KEY_LEN, HASH_LEN};
 use crate::transcript::{AuthenticationRole, TranscriptSink};
-use crate::wire::AEAD_TAG_LEN;
+use crate::wire::{AEAD_TAG_LEN, WireError};
 
 const ML_KEM_SEED_LEN: usize = 64;
 const ML_KEM_ENCAPSULATION_RANDOMNESS_LEN: usize = 32;
@@ -120,6 +128,50 @@ impl fmt::Display for RustCryptoProviderError {
 }
 
 impl std::error::Error for RustCryptoProviderError {}
+
+/// Failure while constructing, transcripting, and sealing real hybrid
+/// authentication for `RESPONSE` or `FINISH`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RustCryptoAuthenticatedHandshakeError {
+    /// Identity signing or another direct concrete-provider operation failed.
+    Provider(RustCryptoProviderError),
+    /// Canonical sender transcript preparation or commit failed.
+    Transcript(HandshakeTranscriptError<RustCryptoProviderError>),
+    /// Finished computation or identity AEAD sealing failed.
+    Crypto(HandshakeCryptoError<RustCryptoProviderError>),
+}
+
+impl fmt::Display for RustCryptoAuthenticatedHandshakeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Provider(error) => write!(formatter, "identity provider failure: {error}"),
+            Self::Transcript(error) => error.fmt(formatter),
+            Self::Crypto(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for RustCryptoAuthenticatedHandshakeError {}
+
+impl From<RustCryptoProviderError> for RustCryptoAuthenticatedHandshakeError {
+    fn from(error: RustCryptoProviderError) -> Self {
+        Self::Provider(error)
+    }
+}
+
+impl From<HandshakeTranscriptError<RustCryptoProviderError>>
+    for RustCryptoAuthenticatedHandshakeError
+{
+    fn from(error: HandshakeTranscriptError<RustCryptoProviderError>) -> Self {
+        Self::Transcript(error)
+    }
+}
+
+impl From<HandshakeCryptoError<RustCryptoProviderError>> for RustCryptoAuthenticatedHandshakeError {
+    fn from(error: HandshakeCryptoError<RustCryptoProviderError>) -> Self {
+        Self::Crypto(error)
+    }
+}
 
 /// Fixed-size pair of ordinary Ed25519 and ML-DSA-65 signatures.
 pub struct RustCryptoHybridSignature {
@@ -296,6 +348,144 @@ impl fmt::Debug for RustCryptoIdentityKeyPair {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("RustCryptoIdentityKeyPair(<redacted>)")
     }
+}
+
+/// Builds real responder signatures and Finished, seals them into the
+/// `RESPONSE` identity ciphertext, and advances the sender transcript.
+///
+/// Signature and Finished hashes are obtained from the role-checked transcript
+/// state. The candidate transcript is committed only after signing, Finished
+/// computation, and AEAD sealing succeed. A later commit failure clears the
+/// ciphertext and is terminal because the one-shot responder AEAD direction
+/// has already been consumed.
+///
+/// # Errors
+///
+/// Returns an output-length, transcript-stage, signing, Finished, provider, or
+/// AEAD failure. A sufficiently large output is cleared on every error.
+pub fn seal_responder_authenticated_identity(
+    provider: &RustCryptoProvider,
+    key_pair: &RustCryptoIdentityKeyPair,
+    transcript: &mut HandshakeTranscript<RustCryptoProvider>,
+    secrets: &mut HandshakeSecrets,
+    message_id: u32,
+    output: &mut [u8],
+) -> Result<ResponderTranscriptMilestone, RustCryptoAuthenticatedHandshakeError> {
+    require_identity_ciphertext_output(output)?;
+    let result = (|| {
+        let signature_hash = transcript.pending_responder_signature_hash()?;
+        let signature = key_pair.sign_handshake(AuthenticationRole::Responder, &signature_hash)?;
+        let ed25519_public_key = key_pair.ed25519_public_key();
+        let content = IdentityAuthContent {
+            ed25519_public_key,
+            ml_dsa_public_key: key_pair.ml_dsa_65_public_key(),
+            ed25519_signature: *signature.ed25519(),
+            ml_dsa_signature: signature.ml_dsa_65(),
+        };
+        let prepared = transcript.prepare_responder_auth(provider, content)?;
+        let authentication = *prepared.authentication();
+        let finished = Zeroizing::new(secrets.compute_finished(
+            provider,
+            AuthenticationRole::Responder,
+            authentication.finished(),
+        )?);
+        let plaintext = IdentityAuth {
+            ed25519_public_key,
+            ml_dsa_public_key: key_pair.ml_dsa_65_public_key(),
+            ed25519_signature: *signature.ed25519(),
+            ml_dsa_signature: signature.ml_dsa_65(),
+            finished_mac: *finished,
+        };
+        seal_responder_identity_auth(
+            provider,
+            secrets,
+            message_id,
+            authentication.signature(),
+            plaintext,
+            output,
+        )?;
+        prepared.commit(provider, &finished).map_err(Into::into)
+    })();
+    if result.is_err() {
+        output[..ENCRYPTED_IDENTITY_AUTH_LEN].zeroize();
+    }
+    result
+}
+
+/// Builds real initiator signatures and Finished, seals them into the `FINISH`
+/// identity ciphertext, and advances the sender transcript to complete.
+///
+/// Signature and Finished hashes are obtained from the role-checked transcript
+/// state. The candidate transcript is committed only after signing, Finished
+/// computation, and AEAD sealing succeed. A later commit failure clears the
+/// ciphertext and is terminal because the one-shot initiator AEAD direction
+/// has already been consumed.
+///
+/// # Errors
+///
+/// Returns an output-length, transcript-stage, signing, Finished, provider, or
+/// AEAD failure. A sufficiently large output is cleared on every error.
+pub fn seal_initiator_authenticated_identity(
+    provider: &RustCryptoProvider,
+    key_pair: &RustCryptoIdentityKeyPair,
+    transcript: &mut HandshakeTranscript<RustCryptoProvider>,
+    secrets: &mut HandshakeSecrets,
+    message_id: u32,
+    output: &mut [u8],
+) -> Result<InitiatorTranscriptMilestone, RustCryptoAuthenticatedHandshakeError> {
+    require_identity_ciphertext_output(output)?;
+    let result = (|| {
+        let signature_hash = transcript.pending_initiator_signature_hash()?;
+        let signature = key_pair.sign_handshake(AuthenticationRole::Initiator, &signature_hash)?;
+        let ed25519_public_key = key_pair.ed25519_public_key();
+        let content = IdentityAuthContent {
+            ed25519_public_key,
+            ml_dsa_public_key: key_pair.ml_dsa_65_public_key(),
+            ed25519_signature: *signature.ed25519(),
+            ml_dsa_signature: signature.ml_dsa_65(),
+        };
+        let prepared = transcript.prepare_initiator_auth(provider, content)?;
+        let authentication = *prepared.authentication();
+        let finished = Zeroizing::new(secrets.compute_finished(
+            provider,
+            AuthenticationRole::Initiator,
+            authentication.finished(),
+        )?);
+        let plaintext = IdentityAuth {
+            ed25519_public_key,
+            ml_dsa_public_key: key_pair.ml_dsa_65_public_key(),
+            ed25519_signature: *signature.ed25519(),
+            ml_dsa_signature: signature.ml_dsa_65(),
+            finished_mac: *finished,
+        };
+        seal_initiator_identity_auth(
+            provider,
+            secrets,
+            message_id,
+            authentication.signature(),
+            plaintext,
+            output,
+        )?;
+        prepared.commit(provider, &finished).map_err(Into::into)
+    })();
+    if result.is_err() {
+        output[..ENCRYPTED_IDENTITY_AUTH_LEN].zeroize();
+    }
+    result
+}
+
+fn require_identity_ciphertext_output(
+    output: &[u8],
+) -> Result<(), RustCryptoAuthenticatedHandshakeError> {
+    if output.len() < ENCRYPTED_IDENTITY_AUTH_LEN {
+        return Err(RustCryptoAuthenticatedHandshakeError::Crypto(
+            HandshakeCryptoError::Wire(WireError::BufferTooSmall {
+                needed: ENCRYPTED_IDENTITY_AUTH_LEN,
+                available: output.len(),
+            }),
+        ));
+    }
+    Ok(())
 }
 
 impl Sha384Provider for RustCryptoHandshakeProvider {

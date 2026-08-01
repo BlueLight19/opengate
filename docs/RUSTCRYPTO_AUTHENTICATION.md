@@ -77,6 +77,21 @@ by the receiver. Both operations return one fixed-size
 `RustCryptoHybridSignature` containing the 64-byte Ed25519 and 3,309-byte
 ML-DSA-65 values.
 
+Two still higher-level sender operations remove the remaining transcript/AEAD
+assembly hazard:
+
+- `seal_responder_authenticated_identity` constructs and seals the responder
+  block and advances the sender transcript to initiator authentication;
+- `seal_initiator_authenticated_identity` constructs and seals the initiator
+  block and advances the sender transcript to complete.
+
+Both obtain the role and signature milestone from `HandshakeTranscript`, sign
+the canonical contextualized hash, append only the signed content to a
+candidate transcript, compute Finished over the resulting snapshot, seal the
+complete fixed plaintext with the same role-correct AAD, and commit the exact
+Finished bytes. The application does not provide raw signature or Finished
+hashes to these operations.
+
 ## Memory and secret lifetime
 
 The selected Ed25519 and ML-DSA configurations do not require heap allocation.
@@ -104,6 +119,13 @@ Canonical signing can return only:
 - Ed25519 signing failure;
 - randomized ML-DSA-65 signing or entropy failure.
 
+The authenticated sender wrappers can additionally return transcript-stage,
+transcript-provider, Finished, output-length, or AEAD failures. They preflight
+the complete output length and clear the fixed ciphertext region on all later
+errors. Transcript preparation is rollback-safe until commit. If sealing has
+already succeeded and the final transcript snapshot fails, that handshake is
+terminal because retrying would reuse a reserved AEAD nonce.
+
 Verification maps peer-controlled malformed values to
 `VerificationResult::Invalid`. Provider errors never contain key material,
 signatures, MACs, transcript hashes, manifest hashes, or entropy bytes.
@@ -127,11 +149,19 @@ Finished, and signature check.
 - the RFC 8032 Ed25519 empty-message known-answer vector;
 - entropy-backed identity generation and fixed-size memory bounds.
 
+`tests/rustcrypto_authenticated_handshake.rs` additionally performs a complete
+mutual wire exchange for AES-256-GCM and ChaCha20-Poly1305. It uses real
+X25519/ML-KEM-768, real Ed25519/randomized ML-DSA-65 identities, independent
+transcript states, encrypted `RESPONSE` and `FINISH`, both trust checks, both
+Finished checks, and equal application-secret derivation.
+
 Run the concrete authentication suite with:
 
 ```sh
 cargo test --features rustcrypto-provider \
   --test rustcrypto_authentication_provider
+cargo test --features rustcrypto-provider \
+  --test rustcrypto_authenticated_handshake
 ```
 
 ## Release blockers
@@ -143,8 +173,9 @@ Before sensitive deployment, this adapter still requires:
   with an equivalently tested audited or formally verified backend;
 - official FIPS 204 ML-DSA-65 known-answer vectors and differential tests
   against an independent implementation;
-- complete encrypted `RESPONSE` and `FINISH` vectors carrying real identity
-  signatures;
+- frozen encrypted `RESPONSE` and `FINISH` vectors for independent
+  cross-implementation consumption (the live randomized end-to-end path is
+  already tested);
 - target-specific signing and verification latency, peak-stack, timing, and
   side-channel measurements;
 - fault-injection tests for entropy failure, process fork, VM snapshot and

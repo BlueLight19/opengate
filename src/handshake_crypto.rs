@@ -287,6 +287,105 @@ pub fn generate_initiator_hybrid_state<P: HandshakeCryptoProvider>(
     })
 }
 
+/// Prepared responder key exchange before `TH_pre_auth` is available.
+///
+/// Public values can be encoded into the `RESPONSE` prefix. Both raw shared
+/// secrets remain private and are zeroized when this value is completed or
+/// dropped.
+pub struct PreparedResponderHybrid {
+    x25519_public_key: [u8; X25519_PUBLIC_KEY_LEN],
+    ml_kem_ciphertext: [u8; ML_KEM_768_CIPHERTEXT_LEN],
+    ml_kem_shared_secret: SecretBytes<ML_KEM_SHARED_SECRET_LEN>,
+    x25519_shared_secret: SecretBytes<X25519_SHARED_SECRET_LEN>,
+}
+
+impl PreparedResponderHybrid {
+    /// Returns the responder X25519 public key for the `RESPONSE` prefix.
+    #[must_use]
+    pub const fn x25519_public_key(&self) -> &[u8; X25519_PUBLIC_KEY_LEN] {
+        &self.x25519_public_key
+    }
+
+    /// Returns the ML-KEM-768 ciphertext for the `RESPONSE` prefix.
+    #[must_use]
+    pub const fn ml_kem_ciphertext(&self) -> &[u8; ML_KEM_768_CIPHERTEXT_LEN] {
+        &self.ml_kem_ciphertext
+    }
+
+    /// Binds both prepared shared secrets to `TH_pre_auth` and installs the
+    /// directional handshake schedule.
+    ///
+    /// # Errors
+    ///
+    /// Returns a KDF, label, hashing, or provider failure.
+    pub fn complete<P: HandshakeCryptoProvider>(
+        self,
+        provider: &P,
+        suite: CipherSuite,
+        pre_auth_hash: &Sha384Digest,
+    ) -> Result<ResponderHybridResult, HandshakeCryptoError<P::Error>> {
+        let secrets = derive_hybrid_handshake_secrets(
+            provider,
+            suite,
+            &self.ml_kem_shared_secret,
+            &self.x25519_shared_secret,
+            pre_auth_hash,
+        )?;
+        Ok(ResponderHybridResult {
+            x25519_public_key: self.x25519_public_key,
+            ml_kem_ciphertext: self.ml_kem_ciphertext,
+            secrets,
+        })
+    }
+}
+
+impl fmt::Debug for PreparedResponderHybrid {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("PreparedResponderHybrid(<redacted>)")
+    }
+}
+
+/// Generates responder public values and retains both raw shared secrets until
+/// the canonical `RESPONSE` prefix yields `TH_pre_auth`.
+///
+/// # Errors
+///
+/// Returns an error for provider/KEM failure or all-zero X25519 output.
+pub fn prepare_responder_hybrid<P: HandshakeCryptoProvider>(
+    provider: &P,
+    initiator_x25519_public_key: &[u8; X25519_PUBLIC_KEY_LEN],
+    ml_kem_encapsulation_key: &[u8; ML_KEM_768_ENCAPSULATION_KEY_LEN],
+) -> Result<PreparedResponderHybrid, HandshakeCryptoError<P::Error>> {
+    let mut x25519_public_key = [0_u8; X25519_PUBLIC_KEY_LEN];
+    let x25519_private_key = provider
+        .generate_x25519_key_pair(&mut x25519_public_key)
+        .map_err(HandshakeCryptoError::Provider)?;
+    let mut x25519_shared_secret = SecretBytes::<X25519_SHARED_SECRET_LEN>::zeroed();
+    provider
+        .x25519_shared_secret(
+            &x25519_private_key,
+            initiator_x25519_public_key,
+            x25519_shared_secret.as_mut_array(),
+        )
+        .map_err(HandshakeCryptoError::Provider)?;
+    reject_all_zero_x25519(x25519_shared_secret.as_array())?;
+    let mut ml_kem_ciphertext = [0_u8; ML_KEM_768_CIPHERTEXT_LEN];
+    let mut ml_kem_shared_secret = SecretBytes::<ML_KEM_SHARED_SECRET_LEN>::zeroed();
+    provider
+        .encapsulate_ml_kem_768(
+            ml_kem_encapsulation_key,
+            &mut ml_kem_ciphertext,
+            ml_kem_shared_secret.as_mut_array(),
+        )
+        .map_err(HandshakeCryptoError::Provider)?;
+    Ok(PreparedResponderHybrid {
+        x25519_public_key,
+        ml_kem_ciphertext,
+        ml_kem_shared_secret,
+        x25519_shared_secret,
+    })
+}
+
 /// Responder public values plus installed directional handshake secrets.
 pub struct ResponderHybridResult {
     x25519_public_key: [u8; X25519_PUBLIC_KEY_LEN],
@@ -345,35 +444,12 @@ pub fn respond_to_initiator<P: HandshakeCryptoProvider>(
     ml_kem_encapsulation_key: &[u8; ML_KEM_768_ENCAPSULATION_KEY_LEN],
     pre_auth_hash: &Sha384Digest,
 ) -> Result<ResponderHybridResult, HandshakeCryptoError<P::Error>> {
-    let mut x25519_public_key = [0_u8; X25519_PUBLIC_KEY_LEN];
-    let x25519_private_key = provider
-        .generate_x25519_key_pair(&mut x25519_public_key)
-        .map_err(HandshakeCryptoError::Provider)?;
-    let mut x25519 = SecretBytes::<X25519_SHARED_SECRET_LEN>::zeroed();
-    provider
-        .x25519_shared_secret(
-            &x25519_private_key,
-            initiator_x25519_public_key,
-            x25519.as_mut_array(),
-        )
-        .map_err(HandshakeCryptoError::Provider)?;
-    reject_all_zero_x25519(x25519.as_array())?;
-    let mut ml_kem_ciphertext = [0_u8; ML_KEM_768_CIPHERTEXT_LEN];
-    let mut ml_kem = SecretBytes::<ML_KEM_SHARED_SECRET_LEN>::zeroed();
-    provider
-        .encapsulate_ml_kem_768(
-            ml_kem_encapsulation_key,
-            &mut ml_kem_ciphertext,
-            ml_kem.as_mut_array(),
-        )
-        .map_err(HandshakeCryptoError::Provider)?;
-    let secrets =
-        derive_hybrid_handshake_secrets(provider, suite, &ml_kem, &x25519, pre_auth_hash)?;
-    Ok(ResponderHybridResult {
-        x25519_public_key,
-        ml_kem_ciphertext,
-        secrets,
-    })
+    prepare_responder_hybrid(
+        provider,
+        initiator_x25519_public_key,
+        ml_kem_encapsulation_key,
+    )?
+    .complete(provider, suite, pre_auth_hash)
 }
 
 /// One sender direction of the handshake schedule.

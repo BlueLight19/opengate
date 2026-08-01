@@ -34,6 +34,7 @@ pub const IDENTITY_AUTH_LEN: usize = ED25519_PUBLIC_KEY_LEN
     + ED25519_SIGNATURE_LEN
     + ML_DSA_65_SIGNATURE_LEN
     + FINISHED_MAC_LEN;
+pub const IDENTITY_AUTH_CONTENT_LEN: usize = IDENTITY_AUTH_LEN - FINISHED_MAC_LEN;
 pub const ENCRYPTED_IDENTITY_AUTH_LEN: usize = IDENTITY_AUTH_LEN + AEAD_TAG_LEN;
 pub const RESPONSE_FIXED_LEN: usize = 2
     + 4
@@ -470,6 +471,75 @@ impl<'a> Finish<'a> {
     }
 }
 
+/// Borrowed signed identity fields that precede Finished in `IdentityAuth`.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct IdentityAuthContent<'a> {
+    pub ed25519_public_key: [u8; ED25519_PUBLIC_KEY_LEN],
+    pub ml_dsa_public_key: &'a [u8],
+    pub ed25519_signature: [u8; ED25519_SIGNATURE_LEN],
+    pub ml_dsa_signature: &'a [u8],
+}
+
+impl fmt::Debug for IdentityAuthContent<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("IdentityAuthContent")
+            .field("ed25519_public_key", &"<redacted>")
+            .field("ml_dsa_public_key", &"<redacted>")
+            .field("ed25519_signature", &"<redacted>")
+            .field("ml_dsa_signature", &"<redacted>")
+            .finish()
+    }
+}
+
+impl<'a> IdentityAuthContent<'a> {
+    /// Encodes the exact signed identity content without a Finished MAC.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an incorrect ML-DSA component size or short output.
+    pub fn encode(self, output: &mut [u8]) -> Result<usize, HandshakeError> {
+        require_component_length(
+            "ML-DSA-65 public key",
+            self.ml_dsa_public_key.len(),
+            ML_DSA_65_PUBLIC_KEY_LEN,
+        )?;
+        require_component_length(
+            "ML-DSA-65 signature",
+            self.ml_dsa_signature.len(),
+            ML_DSA_65_SIGNATURE_LEN,
+        )?;
+        require_output(output, IDENTITY_AUTH_CONTENT_LEN)?;
+
+        output[..ED25519_PUBLIC_KEY_LEN].copy_from_slice(&self.ed25519_public_key);
+        let ml_dsa_key_end = ED25519_PUBLIC_KEY_LEN + ML_DSA_65_PUBLIC_KEY_LEN;
+        output[ED25519_PUBLIC_KEY_LEN..ml_dsa_key_end].copy_from_slice(self.ml_dsa_public_key);
+        let ed25519_signature_end = ml_dsa_key_end + ED25519_SIGNATURE_LEN;
+        output[ml_dsa_key_end..ed25519_signature_end].copy_from_slice(&self.ed25519_signature);
+        output[ed25519_signature_end..IDENTITY_AUTH_CONTENT_LEN]
+            .copy_from_slice(self.ml_dsa_signature);
+        Ok(IDENTITY_AUTH_CONTENT_LEN)
+    }
+
+    /// Decodes exact signed identity content without copying ML-DSA values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error unless `input` is exactly
+    /// [`IDENTITY_AUTH_CONTENT_LEN`] bytes.
+    pub fn decode(input: &'a [u8]) -> Result<Self, HandshakeError> {
+        require_exact(input, IDENTITY_AUTH_CONTENT_LEN)?;
+        let ml_dsa_key_end = ED25519_PUBLIC_KEY_LEN + ML_DSA_65_PUBLIC_KEY_LEN;
+        let ed25519_signature_end = ml_dsa_key_end + ED25519_SIGNATURE_LEN;
+        Ok(Self {
+            ed25519_public_key: copy_array(input, 0)?,
+            ml_dsa_public_key: &input[ED25519_PUBLIC_KEY_LEN..ml_dsa_key_end],
+            ed25519_signature: copy_array(input, ml_dsa_key_end)?,
+            ml_dsa_signature: &input[ed25519_signature_end..],
+        })
+    }
+}
+
 /// Borrowed plaintext sealed inside RESPONSE and FINISH.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct IdentityAuth<'a> {
@@ -494,29 +564,26 @@ impl fmt::Debug for IdentityAuth<'_> {
 }
 
 impl<'a> IdentityAuth<'a> {
+    /// Returns the signed identity fields excluding Finished.
+    #[must_use]
+    pub const fn content(self) -> IdentityAuthContent<'a> {
+        IdentityAuthContent {
+            ed25519_public_key: self.ed25519_public_key,
+            ml_dsa_public_key: self.ml_dsa_public_key,
+            ed25519_signature: self.ed25519_signature,
+            ml_dsa_signature: self.ml_dsa_signature,
+        }
+    }
+
     /// Encodes canonical identity-authentication plaintext.
     ///
     /// # Errors
     ///
     /// Returns an error for an incorrect ML-DSA component size or short output.
     pub fn encode(self, output: &mut [u8]) -> Result<usize, HandshakeError> {
-        require_component_length(
-            "ML-DSA-65 public key",
-            self.ml_dsa_public_key.len(),
-            ML_DSA_65_PUBLIC_KEY_LEN,
-        )?;
-        require_component_length(
-            "ML-DSA-65 signature",
-            self.ml_dsa_signature.len(),
-            ML_DSA_65_SIGNATURE_LEN,
-        )?;
         require_output(output, IDENTITY_AUTH_LEN)?;
-
-        output[0..32].copy_from_slice(&self.ed25519_public_key);
-        output[32..1_984].copy_from_slice(self.ml_dsa_public_key);
-        output[1_984..2_048].copy_from_slice(&self.ed25519_signature);
-        output[2_048..5_357].copy_from_slice(self.ml_dsa_signature);
-        output[5_357..5_405].copy_from_slice(&self.finished_mac);
+        self.content().encode(output)?;
+        output[IDENTITY_AUTH_CONTENT_LEN..IDENTITY_AUTH_LEN].copy_from_slice(&self.finished_mac);
         Ok(IDENTITY_AUTH_LEN)
     }
 
@@ -527,12 +594,13 @@ impl<'a> IdentityAuth<'a> {
     /// Returns an error unless `input` is exactly [`IDENTITY_AUTH_LEN`] bytes.
     pub fn decode(input: &'a [u8]) -> Result<Self, HandshakeError> {
         require_exact(input, IDENTITY_AUTH_LEN)?;
+        let content = IdentityAuthContent::decode(&input[..IDENTITY_AUTH_CONTENT_LEN])?;
         Ok(Self {
-            ed25519_public_key: copy_array(input, 0)?,
-            ml_dsa_public_key: &input[32..1_984],
-            ed25519_signature: copy_array(input, 1_984)?,
-            ml_dsa_signature: &input[2_048..5_357],
-            finished_mac: copy_array(input, 5_357)?,
+            ed25519_public_key: content.ed25519_public_key,
+            ml_dsa_public_key: content.ml_dsa_public_key,
+            ed25519_signature: content.ed25519_signature,
+            ml_dsa_signature: content.ml_dsa_signature,
+            finished_mac: copy_array(input, IDENTITY_AUTH_CONTENT_LEN)?,
         })
     }
 }

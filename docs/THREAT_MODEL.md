@@ -114,7 +114,9 @@ analysis resistance.
   one-shot AEAD suites, published HKDF stages, and tampering.
 - Official ML-DSA-65 known-answer and independent differential coverage; the
   concrete suite already covers randomized signing, real dual verification,
-  manifest binding, and an RFC 8032 Ed25519 known-answer vector.
+  manifest binding, an RFC 8032 Ed25519 known-answer vector, and complete
+  mutually authenticated encrypted `RESPONSE`/`FINISH` exchanges for both
+  cipher suites with independent peer transcripts.
 - Continuous fuzzing of codecs and the bounded handshake state; deterministic
   overlap, metadata-change, admission, pool-exhaustion, and transcript rollback
   tests already exist.

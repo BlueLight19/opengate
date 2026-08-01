@@ -54,9 +54,18 @@ X25519 output bytes and rejects the all-zero result before HKDF.
 
 ## Responder state
 
-`respond_to_initiator` generates a fresh responder X25519 pair, computes the
-X25519 secret, encapsulates to the exact initiator ML-KEM key, and derives the
-schedule before returning anything. Its result owns:
+The responder has a two-phase API because `TH_pre_auth` includes its public
+X25519 key and ML-KEM ciphertext. `prepare_responder_hybrid` generates those
+values, computes both shared secrets, rejects all-zero X25519, and returns a
+non-cloneable `PreparedResponderHybrid`. The caller can encode the canonical
+`RESPONSE` prefix and advance the transcript, then consumes the prepared value
+with `complete(provider, suite, TH_pre_auth)` to derive the directional
+schedule. Raw shared secrets remain private, fixed-size, redacted, and
+zeroized on drop throughout the temporary phase.
+
+The convenience `respond_to_initiator` remains available when the caller
+already has `TH_pre_auth`; it performs prepare and complete in one call. The
+completed result owns:
 
 ```text
 Responder X25519 Public Key[32]
@@ -148,6 +157,16 @@ authenticate the peer identity. The caller must next advance the transactional
 transcript and pass its named snapshots plus the decoded plaintext to
 `authenticate_peer_identity`.
 
+With the concrete provider,
+`seal_responder_authenticated_identity` and
+`seal_initiator_authenticated_identity` perform the sender sequence as one
+role-checked operation: obtain the pending signature hash, create both identity
+signatures, prepare the candidate transcript, compute Finished, seal exactly
+once, and commit the same Finished value. They clear the ciphertext on every
+error. A rare transcript-commit failure after successful sealing is terminal
+because the one-shot AEAD reservation has already been consumed; the caller
+must discard the handshake rather than retry the nonce.
+
 ## Application-secret gate
 
 `derive_application_secrets` consumes all handshake traffic material. It does
@@ -180,12 +199,14 @@ Responder:
 
 1. authenticate the stateless cookie and obtain an admission lease;
 2. reassemble and decode canonical `INIT`;
-3. advance the transcript through the `RESPONSE` prefix and obtain
-   `TH_pre_auth`;
-4. run both hybrid branches and derive the schedule;
-5. construct signatures and responder Finished;
-6. seal responder `IdentityAuth` once, then cache/fragment `RESPONSE`;
-7. reassemble/open `FINISH`, advance the transcript, and authenticate the
+3. prepare fresh responder X25519 and ML-KEM public values plus their retained
+   shared secrets;
+4. encode those exact values into the canonical `RESPONSE` prefix, advance the
+   transcript, and obtain `TH_pre_auth`;
+5. consume the prepared hybrid value to derive the transcript-bound schedule;
+6. sign, compute Finished, seal responder `IdentityAuth` once, commit the
+   sender transcript, then cache/fragment the final `RESPONSE`;
+7. reassemble/open `FINISH`, advance the receiver transcript, and authenticate the
    initiator;
 8. derive application secrets using the completed-transcript and authenticated-
    identity capabilities.
@@ -217,7 +238,11 @@ Feature-gated integration tests additionally execute real X25519 and
 ML-KEM-768 exchanges, reproduce published HKDF stages, compare Finished values,
 exercise AES-256-GCM and ChaCha20-Poly1305 in both handshake directions, reject
 tampering and non-canonical ML-KEM public keys, and verify that malformed
-ML-KEM ciphertexts retain implicit-rejection behavior.
+ML-KEM ciphertexts retain implicit-rejection behavior. The mutual wire test
+also runs two independent transcript states through `HELLO`, `RETRY`, `INIT`,
+encrypted `RESPONSE`, and encrypted `FINISH`; verifies both real hybrid
+identities and Finished values; and proves equal application secrets at both
+peers for both suites.
 
 Production work still includes:
 

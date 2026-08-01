@@ -314,13 +314,19 @@ The KDF vectors were cross-checked using Python's standard HMAC/SHA-384
 implementation and `cryptography`'s independent HKDFExpand implementation. The
 packet vectors are continuously reproduced with independent RustCrypto AEAD,
 AES block-cipher, and ChaCha20 implementations in `tests/packet_vectors.rs`.
+The feature-gated mutual-handshake test additionally composes real randomized
+identity signatures and fresh hybrid KEM values through encrypted `RESPONSE`
+and `FINISH` messages for both suites. Because those operations intentionally
+consume operating-system randomness, this live test complements rather than
+replaces a future frozen cross-implementation vector.
 
 ## 9. Release requirements
 
 Before production use, this schedule requires:
 
 - independent cryptographic review;
-- complete encrypted-handshake vectors carrying real hybrid identity values;
+- frozen encrypted-handshake vectors carrying real hybrid identity values for
+  independent cross-implementation consumption;
 - independent audit or replacement of the feature-gated concrete provider,
   plus official X25519/ML-KEM-768 and ML-DSA-65 known-answer and differential
   coverage; real Ed25519/ML-DSA negative tests already run in the feature-gated

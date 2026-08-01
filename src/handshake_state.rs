@@ -5,9 +5,9 @@ use core::fmt;
 use crate::crypto::{ForkableSha384Provider, SHA384_OUTPUT_LEN, Sha384Digest};
 use crate::handshake::{
     CIPHER_SUITE_AES_256_GCM_SHA384_BIT, CIPHER_SUITE_CHACHA20_POLY1305_SHA384_BIT, FINISH_LEN,
-    FINISHED_MAC_LEN, HELLO_LEN, Hello, IDENTITY_AUTH_LEN, INIT_FIXED_LEN, IdentityAuth, Init,
-    KNOWN_CAPABILITY_BITS, MAX_RETRY_COOKIE_LEN, MIN_RETRY_COOKIE_LEN, RANDOM_LEN,
-    RESPONSE_FIXED_LEN, RESPONSE_LEN, Response, Retry,
+    FINISHED_MAC_LEN, HELLO_LEN, Hello, IDENTITY_AUTH_CONTENT_LEN, INIT_FIXED_LEN, IdentityAuth,
+    IdentityAuthContent, Init, KNOWN_CAPABILITY_BITS, MAX_RETRY_COOKIE_LEN, MIN_RETRY_COOKIE_LEN,
+    RANDOM_LEN, RESPONSE_FIXED_LEN, RESPONSE_LEN, Response, Retry,
 };
 use crate::retry::HandshakeAdmissionLease;
 use crate::transcript::{SessionContext, TranscriptError, TranscriptRecordType, feed_record};
@@ -18,7 +18,6 @@ use crate::wire::long::{
 
 const HANDSHAKE_RECEIPT_BITMAP_LEN: usize = MAX_HANDSHAKE_MESSAGE_LEN.div_ceil(8);
 const MAX_SESSION_CONTEXT_LEN: usize = 6 + 2 * MAX_LONG_CONNECTION_ID_LEN;
-const IDENTITY_AUTH_CONTENT_LEN: usize = IDENTITY_AUTH_LEN - FINISHED_MAC_LEN;
 
 /// Admission proof required before a fragmented logical message may reserve a
 /// reassembly slot.
@@ -646,6 +645,109 @@ pub struct HandshakeTranscript<P: ForkableSha384Provider> {
     initiator_signature: Sha384Digest,
 }
 
+/// Transactional sender-side responder-auth preparation.
+///
+/// The transcript remains unchanged until [`Self::commit`] appends the exact
+/// Finished MAC. Dropping this value rolls the candidate transcript back.
+pub struct PreparedResponderAuth<'a, P: ForkableSha384Provider> {
+    transcript: &'a mut HandshakeTranscript<P>,
+    candidate: P::Context,
+    authentication: AuthenticationTranscriptHashes,
+}
+
+impl<P: ForkableSha384Provider> PreparedResponderAuth<'_, P> {
+    /// Returns the role-correct signature and Finished transcript hashes.
+    #[must_use]
+    pub const fn authentication(&self) -> &AuthenticationTranscriptHashes {
+        &self.authentication
+    }
+
+    /// Appends the exact responder Finished record and commits the candidate.
+    ///
+    /// # Errors
+    ///
+    /// Returns a transcript-framing or provider snapshot failure. The original
+    /// transcript remains unchanged on error.
+    pub fn commit(
+        mut self,
+        provider: &P,
+        finished_mac: &[u8; FINISHED_MAC_LEN],
+    ) -> Result<ResponderTranscriptMilestone, HandshakeTranscriptError<P::Error>> {
+        feed_record(
+            &mut self.candidate,
+            TranscriptRecordType::ResponderFinished,
+            finished_mac,
+        )?;
+        let initiator_signature = provider
+            .snapshot_sha384(&self.candidate)
+            .map_err(HandshakeTranscriptError::Provider)?;
+        self.transcript.context = self.candidate;
+        self.transcript.initiator_signature = initiator_signature;
+        self.transcript.stage = HandshakeTranscriptStage::ExpectInitiatorAuth;
+        Ok(ResponderTranscriptMilestone {
+            authentication: self.authentication,
+            initiator_signature,
+        })
+    }
+}
+
+impl<P: ForkableSha384Provider> fmt::Debug for PreparedResponderAuth<'_, P> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("PreparedResponderAuth(<redacted>)")
+    }
+}
+
+/// Transactional sender-side initiator-auth preparation.
+///
+/// The transcript remains unchanged until [`Self::commit`] appends the exact
+/// Finished MAC. Dropping this value rolls the candidate transcript back.
+pub struct PreparedInitiatorAuth<'a, P: ForkableSha384Provider> {
+    transcript: &'a mut HandshakeTranscript<P>,
+    candidate: P::Context,
+    authentication: AuthenticationTranscriptHashes,
+}
+
+impl<P: ForkableSha384Provider> PreparedInitiatorAuth<'_, P> {
+    /// Returns the role-correct signature and Finished transcript hashes.
+    #[must_use]
+    pub const fn authentication(&self) -> &AuthenticationTranscriptHashes {
+        &self.authentication
+    }
+
+    /// Appends the exact initiator Finished record and commits the candidate.
+    ///
+    /// # Errors
+    ///
+    /// Returns a transcript-framing or provider snapshot failure. The original
+    /// transcript remains unchanged on error.
+    pub fn commit(
+        mut self,
+        provider: &P,
+        finished_mac: &[u8; FINISHED_MAC_LEN],
+    ) -> Result<InitiatorTranscriptMilestone, HandshakeTranscriptError<P::Error>> {
+        feed_record(
+            &mut self.candidate,
+            TranscriptRecordType::InitiatorFinished,
+            finished_mac,
+        )?;
+        let full = provider
+            .snapshot_sha384(&self.candidate)
+            .map_err(HandshakeTranscriptError::Provider)?;
+        self.transcript.context = self.candidate;
+        self.transcript.stage = HandshakeTranscriptStage::Complete;
+        Ok(InitiatorTranscriptMilestone {
+            authentication: self.authentication,
+            full,
+        })
+    }
+}
+
+impl<P: ForkableSha384Provider> fmt::Debug for PreparedInitiatorAuth<'_, P> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("PreparedInitiatorAuth(<redacted>)")
+    }
+}
+
 impl<P: ForkableSha384Provider> fmt::Debug for HandshakeTranscript<P> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -812,6 +914,110 @@ impl<P: ForkableSha384Provider> HandshakeTranscript<P> {
         Ok(pre_auth)
     }
 
+    /// Returns `TH_r_signature` only while responder authentication is pending.
+    ///
+    /// # Errors
+    ///
+    /// Returns an unexpected-stage error outside `ExpectResponderAuth`.
+    pub fn pending_responder_signature_hash(
+        &self,
+    ) -> Result<Sha384Digest, HandshakeTranscriptError<P::Error>> {
+        self.require_stage(HandshakeTranscriptStage::ExpectResponderAuth)?;
+        Ok(self.pre_auth)
+    }
+
+    /// Returns `TH_i_signature` only while initiator authentication is pending.
+    ///
+    /// # Errors
+    ///
+    /// Returns an unexpected-stage error outside `ExpectInitiatorAuth`.
+    pub fn pending_initiator_signature_hash(
+        &self,
+    ) -> Result<Sha384Digest, HandshakeTranscriptError<P::Error>> {
+        self.require_stage(HandshakeTranscriptStage::ExpectInitiatorAuth)?;
+        Ok(self.initiator_signature)
+    }
+
+    /// Prepares signed responder identity content without mutating the
+    /// transcript and returns the hash needed to compute Finished.
+    ///
+    /// The returned capability borrows this transcript mutably. It must be
+    /// committed with the exact Finished MAC or dropped to roll back.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unexpected stage, invalid content, transcript
+    /// framing failure, or provider failure. State is unchanged on error.
+    pub fn prepare_responder_auth(
+        &mut self,
+        provider: &P,
+        content: IdentityAuthContent<'_>,
+    ) -> Result<PreparedResponderAuth<'_, P>, HandshakeTranscriptError<P::Error>> {
+        self.require_stage(HandshakeTranscriptStage::ExpectResponderAuth)?;
+        let mut encoded = [0_u8; IDENTITY_AUTH_CONTENT_LEN];
+        content.encode(&mut encoded)?;
+        let mut candidate = provider
+            .fork_sha384(&self.context)
+            .map_err(HandshakeTranscriptError::Provider)?;
+        feed_record(
+            &mut candidate,
+            TranscriptRecordType::ResponderAuthContent,
+            &encoded,
+        )?;
+        let finished = provider
+            .snapshot_sha384(&candidate)
+            .map_err(HandshakeTranscriptError::Provider)?;
+        let authentication = AuthenticationTranscriptHashes {
+            signature: self.pre_auth,
+            finished,
+        };
+        Ok(PreparedResponderAuth {
+            transcript: self,
+            candidate,
+            authentication,
+        })
+    }
+
+    /// Prepares signed initiator identity content without mutating the
+    /// transcript and returns the hash needed to compute Finished.
+    ///
+    /// The returned capability borrows this transcript mutably. It must be
+    /// committed with the exact Finished MAC or dropped to roll back.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unexpected stage, invalid content, transcript
+    /// framing failure, or provider failure. State is unchanged on error.
+    pub fn prepare_initiator_auth(
+        &mut self,
+        provider: &P,
+        content: IdentityAuthContent<'_>,
+    ) -> Result<PreparedInitiatorAuth<'_, P>, HandshakeTranscriptError<P::Error>> {
+        self.require_stage(HandshakeTranscriptStage::ExpectInitiatorAuth)?;
+        let mut encoded = [0_u8; IDENTITY_AUTH_CONTENT_LEN];
+        content.encode(&mut encoded)?;
+        let mut candidate = provider
+            .fork_sha384(&self.context)
+            .map_err(HandshakeTranscriptError::Provider)?;
+        feed_record(
+            &mut candidate,
+            TranscriptRecordType::InitiatorAuthContent,
+            &encoded,
+        )?;
+        let finished = provider
+            .snapshot_sha384(&candidate)
+            .map_err(HandshakeTranscriptError::Provider)?;
+        let authentication = AuthenticationTranscriptHashes {
+            signature: self.initiator_signature,
+            finished,
+        };
+        Ok(PreparedInitiatorAuth {
+            transcript: self,
+            candidate,
+            authentication,
+        })
+    }
+
     /// Adds decrypted responder auth content and Finished records atomically.
     ///
     /// # Errors
@@ -823,38 +1029,9 @@ impl<P: ForkableSha384Provider> HandshakeTranscript<P> {
         provider: &P,
         plaintext: &[u8],
     ) -> Result<ResponderTranscriptMilestone, HandshakeTranscriptError<P::Error>> {
-        self.require_stage(HandshakeTranscriptStage::ExpectResponderAuth)?;
-        IdentityAuth::decode(plaintext)?;
-        let mut candidate = provider
-            .fork_sha384(&self.context)
-            .map_err(HandshakeTranscriptError::Provider)?;
-        feed_record(
-            &mut candidate,
-            TranscriptRecordType::ResponderAuthContent,
-            &plaintext[..IDENTITY_AUTH_CONTENT_LEN],
-        )?;
-        let responder_finished = provider
-            .snapshot_sha384(&candidate)
-            .map_err(HandshakeTranscriptError::Provider)?;
-        feed_record(
-            &mut candidate,
-            TranscriptRecordType::ResponderFinished,
-            &plaintext[IDENTITY_AUTH_CONTENT_LEN..],
-        )?;
-        let initiator_signature = provider
-            .snapshot_sha384(&candidate)
-            .map_err(HandshakeTranscriptError::Provider)?;
-
-        self.context = candidate;
-        self.initiator_signature = initiator_signature;
-        self.stage = HandshakeTranscriptStage::ExpectInitiatorAuth;
-        Ok(ResponderTranscriptMilestone {
-            authentication: AuthenticationTranscriptHashes {
-                signature: self.pre_auth,
-                finished: responder_finished,
-            },
-            initiator_signature,
-        })
+        let identity_auth = IdentityAuth::decode(plaintext)?;
+        self.prepare_responder_auth(provider, identity_auth.content())?
+            .commit(provider, &identity_auth.finished_mac)
     }
 
     /// Adds decrypted initiator auth content and Finished records atomically.
@@ -868,37 +1045,9 @@ impl<P: ForkableSha384Provider> HandshakeTranscript<P> {
         provider: &P,
         plaintext: &[u8],
     ) -> Result<InitiatorTranscriptMilestone, HandshakeTranscriptError<P::Error>> {
-        self.require_stage(HandshakeTranscriptStage::ExpectInitiatorAuth)?;
-        IdentityAuth::decode(plaintext)?;
-        let mut candidate = provider
-            .fork_sha384(&self.context)
-            .map_err(HandshakeTranscriptError::Provider)?;
-        feed_record(
-            &mut candidate,
-            TranscriptRecordType::InitiatorAuthContent,
-            &plaintext[..IDENTITY_AUTH_CONTENT_LEN],
-        )?;
-        let initiator_finished = provider
-            .snapshot_sha384(&candidate)
-            .map_err(HandshakeTranscriptError::Provider)?;
-        feed_record(
-            &mut candidate,
-            TranscriptRecordType::InitiatorFinished,
-            &plaintext[IDENTITY_AUTH_CONTENT_LEN..],
-        )?;
-        let full = provider
-            .snapshot_sha384(&candidate)
-            .map_err(HandshakeTranscriptError::Provider)?;
-
-        self.context = candidate;
-        self.stage = HandshakeTranscriptStage::Complete;
-        Ok(InitiatorTranscriptMilestone {
-            authentication: AuthenticationTranscriptHashes {
-                signature: self.initiator_signature,
-                finished: initiator_finished,
-            },
-            full,
-        })
+        let identity_auth = IdentityAuth::decode(plaintext)?;
+        self.prepare_initiator_auth(provider, identity_auth.content())?
+            .commit(provider, &identity_auth.finished_mac)
     }
 
     #[must_use]
@@ -1122,8 +1271,9 @@ mod tests {
     use crate::handshake::{
         CAPABILITY_MULTIPATH_BIT, CAPABILITY_PERIODIC_HYBRID_REKEY_BIT, CAPABILITY_RESUME_BIT,
         CipherSuite, ED25519_PUBLIC_KEY_LEN, ED25519_SIGNATURE_LEN, ENCRYPTED_IDENTITY_AUTH_LEN,
-        IDENTITY_FINGERPRINT_LEN, ML_DSA_65_PUBLIC_KEY_LEN, ML_DSA_65_SIGNATURE_LEN,
-        ML_KEM_768_CIPHERTEXT_LEN, ML_KEM_768_ENCAPSULATION_KEY_LEN, X25519_PUBLIC_KEY_LEN,
+        IDENTITY_AUTH_LEN, IDENTITY_FINGERPRINT_LEN, ML_DSA_65_PUBLIC_KEY_LEN,
+        ML_DSA_65_SIGNATURE_LEN, ML_KEM_768_CIPHERTEXT_LEN, ML_KEM_768_ENCAPSULATION_KEY_LEN,
+        X25519_PUBLIC_KEY_LEN,
     };
     use crate::transcript::{TranscriptSink, feed_record};
 
@@ -1625,6 +1775,83 @@ mod tests {
             &expected_initiator_finished
         );
         assert_eq!(initiator.full(), &expected_full);
+        assert_eq!(transcript.stage(), HandshakeTranscriptStage::Complete);
+    }
+
+    #[test]
+    fn sender_auth_preparation_rolls_back_on_drop_and_commit_failure() {
+        let provider = TestProvider::default();
+        let session = SessionContext {
+            version: 1,
+            initiator_connection_id: b"initiator",
+            responder_connection_id: b"responder",
+        };
+        let hello = encode_hello();
+        let cookie = [0xa5; 32];
+        let retry = encode_retry(&cookie);
+        let init = encode_init(&cookie);
+        let response = encode_response();
+        let responder_auth = encode_identity_auth(0xb0);
+        let initiator_auth = encode_identity_auth(0xc0);
+        let responder_identity =
+            IdentityAuth::decode(&responder_auth).expect("responder identity authentication");
+        let initiator_identity =
+            IdentityAuth::decode(&initiator_auth).expect("initiator identity authentication");
+
+        let mut transcript = HandshakeTranscript::new(&provider, session).expect("starts");
+        transcript.record_hello(&provider, &hello).expect("HELLO");
+        transcript.record_retry(&provider, &retry).expect("RETRY");
+        transcript.record_init(&provider, &init).expect("INIT");
+        let pre_auth = transcript
+            .record_response(&provider, &response)
+            .expect("RESPONSE");
+
+        {
+            let prepared = transcript
+                .prepare_responder_auth(&provider, responder_identity.content())
+                .expect("prepare responder authentication");
+            assert_eq!(prepared.authentication().signature(), &pre_auth);
+        }
+        assert_eq!(
+            transcript.stage(),
+            HandshakeTranscriptStage::ExpectResponderAuth
+        );
+        assert_eq!(
+            transcript
+                .pending_responder_signature_hash()
+                .expect("responder signature remains pending"),
+            pre_auth
+        );
+
+        provider.successful_forks_before_failure.set(Some(2));
+        assert_eq!(
+            transcript.record_responder_auth(&provider, &responder_auth),
+            Err(HandshakeTranscriptError::Provider(ProviderError))
+        );
+        assert_eq!(
+            transcript.stage(),
+            HandshakeTranscriptStage::ExpectResponderAuth
+        );
+
+        let responder = transcript
+            .record_responder_auth(&provider, &responder_auth)
+            .expect("responder authentication retry");
+        {
+            let prepared = transcript
+                .prepare_initiator_auth(&provider, initiator_identity.content())
+                .expect("prepare initiator authentication");
+            assert_eq!(
+                prepared.authentication().signature(),
+                responder.initiator_signature()
+            );
+        }
+        assert_eq!(
+            transcript.stage(),
+            HandshakeTranscriptStage::ExpectInitiatorAuth
+        );
+        transcript
+            .record_initiator_auth(&provider, &initiator_auth)
+            .expect("initiator authentication after rollback");
         assert_eq!(transcript.stage(), HandshakeTranscriptStage::Complete);
     }
 
