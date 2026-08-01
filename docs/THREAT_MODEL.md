@@ -69,7 +69,7 @@ analysis resistance.
 | Man-in-the-middle | Dual transcript signatures and pre-authenticated keys | Human pairing error |
 | Future quantum decryption | Ephemeral X25519 + ML-KEM-768 | Implementation flaw or break of both families |
 | Nonce reuse | Separate key per DCID, monotonic packet number, close before limit | State bug or snapshot restore |
-| Replay | Per-path packet-number window and sequenced CONTROL messages | CPU spent before rejection |
+| Replay | Per-path packet-number window, sequenced CONTROL values, and idempotent COMMIT accounting | CPU spent before rejection |
 | ECN suppression or rewriting | Authenticated cumulative counters, sender-mark validation, per-path fallback to Not-ECT | An on-path attacker can still add CE or drop/delay traffic |
 | UDP amplification | Stateless RETRY and 3x amplification limit | Botnet using valid source addresses |
 | Handshake RAM exhaustion | Cookie before state, message limit, global and per-source quotas | Distributed source addresses |

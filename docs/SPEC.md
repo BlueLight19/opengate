@@ -275,6 +275,9 @@ Unknown types with a clear high bit are ignored. Unknown types with a set high
 bit cause `UNSUPPORTED_CRITICAL_FRAME`. A packet containing a truncated TLV is
 invalid in its entirety.
 
+Canonical values and complete TLVs for CREDIT, COMMIT, and RESUME are published
+in [`control-values-v1.txt`](../test-vectors/control-values-v1.txt).
+
 ## 10. PROBE packets
 
 PROBE plaintext is:
@@ -323,7 +326,25 @@ MAY reread `(descriptor, offset, length)` from the source. Any retransmission
 cache is optional and strictly bounded.
 
 COMMIT is emitted after a chunk has been written and verified. Final success
-requires the expected manifest root and every required COMMIT.
+requires the expected manifest root and every required COMMIT. Its value is:
+
+```text
+Sequence u64 | Object Slot u32 | Flags u8 | Range Count u8
+             | Range Count * (Chunk Start u32 | Chunk Count u32)
+```
+
+`Sequence` is monotonically increasing within one object slot. Stale or
+duplicate COMMIT values are ignored. In `Flags`, bit 0 is `OBJECT_COMPLETE` and
+bits 7 through 1 are zero. `OBJECT_COMPLETE` MUST be set only after every
+manifest chunk and the final Merkle root have been verified.
+
+`Range Count` is between 1 and 32 inclusive. COMMIT ranges use absolute chunk
+indices. Every `Chunk Count` is non-zero and `Chunk Start + Chunk Count` MUST
+NOT exceed `2^32`. Ranges are strictly increasing, non-overlapping, and
+non-adjacent; adjacent runs MUST be merged to produce one canonical encoding.
+The sender validates every range against the manifest and releases byte and
+fragment credit from its local per-chunk accounting. A duplicate committed
+chunk never releases credit twice, and no wire-supplied byte count is trusted.
 
 ## 12. Manifest and resume
 
@@ -332,8 +353,31 @@ count, SHA-384 Merkle root, minimal metadata, and dual Ed25519 + ML-DSA-65
 signatures.
 
 Wire-visible identifiers are never global content hashes. A resume exchange
-sends a compressed bitmap of verified chunks inside an encrypted packet. The
-sender retransmits only missing ranges.
+sends a range-compressed bitmap of verified chunks inside encrypted CONTROL
+packets. Each RESUME value describes one window:
+
+```text
+Sequence u64 | Object Slot u32 | Window Start u32
+             | Window Chunk Count u32 | Flags u8 | Range Count u8
+             | Range Count * (Relative Start u32 | Chunk Count u32)
+```
+
+`Window Chunk Count` is non-zero and the exclusive end of the window MUST NOT
+exceed `2^32` or the manifest chunk count. In `Flags`, bit 0 is `FINAL_WINDOW`
+and bits 7 through 1 are zero. `Range Count` is between 0 and 32 inclusive; an
+empty list means that no chunk in the window is already verified. Range starts
+are relative to `Window Start`. Counts are non-zero, ranges stay inside the
+window, and the same sorted, non-overlapping, non-adjacent canonical rule as
+COMMIT applies.
+
+All windows in one snapshot carry the same sequence and object slot. The first
+window starts at zero; each following window starts at the exclusive end of the
+previous one. `FINAL_WINDOW` is set exactly on the window ending at the
+manifest chunk count. A sender does not skip DATA until it has authenticated a
+complete gap-free snapshot. Newer snapshot sequences replace older ones;
+stale, duplicate, overlapping, or discontinuous windows are ignored or abort
+that snapshot without changing committed state. The sender then transmits only
+chunks absent from the verified ranges.
 
 ## 13. Hybrid handshake
 
@@ -657,7 +701,6 @@ and reject structurally invalid packet forms.
 
 - Independent cryptographic audit and cross-implementation validation.
 - Canonical manifest and dual-signature encoding.
-- Bit-exact CREDIT, COMMIT, and RESUME values.
 - Persistent-congestion and ECN ancillary-data integration with the production
   event loop.
 - Physical shared-bottleneck fairness validation of the experimental

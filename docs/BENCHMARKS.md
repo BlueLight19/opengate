@@ -135,6 +135,8 @@ Performance alone is insufficient. The harness includes:
 - maximum lengths and arithmetic overflow attempts;
 - massive duplication and replay;
 - ACK packets containing 0 through 32 additional ranges;
+- COMMIT and RESUME values containing 0 through 32 canonical or adversarial
+  chunk ranges;
 - millions of unknown DCIDs;
 - incomplete handshake fragments;
 - invalid authentication tags;

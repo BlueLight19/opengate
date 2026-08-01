@@ -19,6 +19,8 @@ The current `0.2` version is an early design and codec milestone:
   packets, plus fragmented long-header handshake packets;
 - sender-side CREDIT accounting that enforces absolute byte and fragment
   ceilings without charging retransmissions twice;
+- canonical, allocation-free CREDIT, COMMIT, and windowed RESUME values with
+  public bit-exact CONTROL vectors;
 - canonical handshake, transcript, and HKDF serializers;
 - provider-neutral in-place packet-protection orchestration with enforced AEAD
   usage limits;

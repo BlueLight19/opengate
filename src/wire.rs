@@ -287,6 +287,10 @@ pub enum WireError {
     TooManyAckRanges { count: usize, maximum: usize },
     InvalidAckRanges,
     InvalidAckFlags(u8),
+    TooManyChunkRanges { count: usize, maximum: usize },
+    InvalidChunkRanges,
+    InvalidResumeWindow,
+    InvalidControlFlags { frame_type: u8, flags: u8 },
     FrameValueTooLarge { length: usize, maximum: usize },
     UnknownProbeKind(u8),
     NonZeroProbePadding,
@@ -327,6 +331,18 @@ impl fmt::Display for WireError {
             }
             Self::InvalidAckRanges => formatter.write_str("invalid ACK ranges"),
             Self::InvalidAckFlags(flags) => write!(formatter, "invalid ACK flags: {flags:#x}"),
+            Self::TooManyChunkRanges { count, maximum } => {
+                write!(
+                    formatter,
+                    "too many chunk ranges: {count}, maximum {maximum}"
+                )
+            }
+            Self::InvalidChunkRanges => formatter.write_str("invalid canonical chunk ranges"),
+            Self::InvalidResumeWindow => formatter.write_str("invalid RESUME chunk window"),
+            Self::InvalidControlFlags { frame_type, flags } => write!(
+                formatter,
+                "invalid CONTROL flags {flags:#x} for frame type {frame_type:#x}"
+            ),
             Self::FrameValueTooLarge { length, maximum } => {
                 write!(
                     formatter,
